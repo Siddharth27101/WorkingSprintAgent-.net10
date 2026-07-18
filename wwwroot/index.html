@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Working Sprint Agent API</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            max-width: 800px;
+            background: white;
+            border-radius: 20px;
+            padding: 60px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        h1 {
+            font-size: 3rem;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            font-weight: 300;
+        }
+        .subtitle {
+            font-size: 1.2rem;
+            color: #7f8c8d;
+            margin-bottom: 40px;
+        }
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 30px;
+            margin: 40px 0;
+        }
+        .feature {
+            background: #f8f9fa;
+            padding: 30px;
+            border-radius: 15px;
+            border-left: 5px solid #3498db;
+        }
+        .feature h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+        }
+        .feature p {
+            color: #5a6c7d;
+            font-size: 0.95rem;
+        }
+        .cta-buttons {
+            margin-top: 40px;
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .btn {
+            display: inline-block;
+            padding: 15px 30px;
+            border-radius: 50px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            color: white;
+        }
+        .btn-secondary {
+            background: transparent;
+            color: #3498db;
+            border: 2px solid #3498db;
+        }
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(52, 152, 219, 0.3);
+        }
+        .api-info {
+            margin-top: 40px;
+            padding: 30px;
+            background: #ecf0f1;
+            border-radius: 15px;
+            text-align: left;
+        }
+        .api-info h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        .endpoint {
+            background: white;
+            padding: 10px 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            color: #27ae60;
+            border-left: 4px solid #27ae60;
+        }
+        .status-badge {
+            display: inline-block;
+            background: #27ae60;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <span class="status-badge">🟢 API Online</span>
+        <h1>Working Sprint Agent</h1>
+        <p class="subtitle">AI-Powered Sprint Analysis & Presentation Generation</p>
+        
+        <div class="features">
+            <div class="feature">
+                <h3>🤖 AI Insights</h3>
+                <p>Advanced sprint analysis using OpenAI GPT models for intelligent recommendations and insights.</p>
+            </div>
+            <div class="feature">
+                <h3>📊 PowerPoint Generation</h3>
+                <p>Stakeholder-ready presentations with professional charts, metrics, and executive summaries.</p>
+            </div>
+            <div class="feature">
+                <h3>💰 Cost Optimized</h3>
+                <p>Smart caching, token usage tracking, and optimization strategies to minimize AI costs.</p>
+            </div>
+            <div class="feature">
+                <h3>🎨 Multiple Templates</h3>
+                <p>Professional, Modern, Corporate, and Minimal presentation templates with custom branding.</p>
+            </div>
+        </div>
+
+        <div class="cta-buttons">
+            <a href="/api/docs" class="btn btn-primary">📖 API Documentation</a>
+            <a href="/api/sprintreport/csv-format" class="btn btn-secondary">📋 CSV Format Guide</a>
+        </div>
+
+        <div class="api-info">
+            <h3>Quick Start API Endpoints</h3>
+            <div class="endpoint">POST /api/sprintreport/generate - Generate sprint presentation</div>
+            <div class="endpoint">POST /api/sprintreport/preview - Preview sprint data</div>
+            <div class="endpoint">GET /api/sprintreport/health - System health check</div>
+            <div class="endpoint">GET /api/sprintreport/ai-status - AI service status</div>
+        </div>
+    </div>
+</body>
+</html>
