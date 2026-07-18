@@ -2,6 +2,9 @@ using WorkingSprintAgent.Models;
 
 namespace WorkingSprintAgent.Services;
 
+/// <summary>
+/// Mock insight generation service - used as fallback when AI is not available
+/// </summary>
 public class MockInsightGenerationService : IInsightGenerationService
 {
     private readonly ILogger<MockInsightGenerationService> _logger;
@@ -11,7 +14,9 @@ public class MockInsightGenerationService : IInsightGenerationService
         _logger = logger;
     }
 
-    public Task<SprintInsights> GenerateInsightsAsync(SprintMetrics metrics, CancellationToken ct = default)
+    public bool IsAIEnabled => false;
+
+    public Task<SprintInsights> GenerateInsightsAsync(SprintMetrics metrics, CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Generating mock insights for sprint '{SprintName}'", metrics.SprintName);
 
@@ -27,6 +32,65 @@ public class MockInsightGenerationService : IInsightGenerationService
 
         return Task.FromResult(insights);
     }
+
+    public async Task<AIInsightsResponse> GenerateEnhancedInsightsAsync(SprintMetrics metrics, CancellationToken cancellationToken = default)
+    {
+        var insights = await GenerateInsightsAsync(metrics, cancellationToken);
+        
+        return new AIInsightsResponse
+        {
+            Insights = insights,
+            TokenUsage = new TokenUsageStats
+            {
+                Timestamp = DateTime.UtcNow,
+                RequestType = "Mock",
+                InputTokens = 0,
+                OutputTokens = 0,
+                TotalTokens = 0,
+                EstimatedCost = 0,
+                Model = "Mock Service",
+                ResponseTime = TimeSpan.FromMilliseconds(10),
+                CacheHit = false
+            },
+            OptimizationSuggestions = new List<string>
+            {
+                "Mock service active - configure OpenAI API key for AI-powered insights",
+                "Zero cost operation but limited analytical capabilities",
+                "Enable AI service for enhanced contextual understanding"
+            },
+            FromCache = false
+        };
+    }
+
+    public InsightServiceStatus GetServiceStatus()
+    {
+        return new InsightServiceStatus
+        {
+            IsAIEnabled = false,
+            ServiceType = "Mock Service",
+            Model = "Rule-based",
+            IsCachingEnabled = false,
+            IsTokenTrackingEnabled = false,
+            MaxDailyTokens = 0,
+            EstimatedCostPerRequest = 0,
+            Capabilities = new List<string>
+            {
+                "Rule-based insight generation",
+                "Statistical analysis", 
+                "Pattern recognition",
+                "Deterministic recommendations"
+            },
+            Limitations = new List<string>
+            {
+                "No AI-powered analysis",
+                "Limited contextual understanding",
+                "Static recommendation patterns",
+                "No natural language generation"
+            }
+        };
+    }
+
+    #region Private Helper Methods - Keep existing implementation
 
     private static string GenerateExecutiveSummary(SprintMetrics metrics)
     {
