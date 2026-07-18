@@ -1,0 +1,13 @@
+TaskId,Title,Assignee,Status,Type,Priority,StoryPoints,SprintName,StartDate,EndDate
+TASK-001,User Authentication System,John Doe,Done,Story,High,8,Sprint 15,2024-01-01,2024-01-12
+TASK-002,Database Schema Migration,Jane Smith,Done,Task,Medium,5,Sprint 15,2024-01-02,2024-01-10
+TASK-003,API Integration Tests,Bob Johnson,In Progress,Task,Medium,3,Sprint 15,2024-01-03,
+TASK-004,UI Component Library,Alice Brown,Done,Story,High,13,Sprint 15,2024-01-01,2024-01-14
+TASK-005,Performance Optimization,Charlie Wilson,Blocked,Bug,Critical,5,Sprint 15,2024-01-05,
+TASK-006,Documentation Updates,Eve Davis,Done,Task,Low,2,Sprint 15,2024-01-08,2024-01-15
+TASK-007,Security Audit,Frank Miller,In Review,Task,High,8,Sprint 15,2024-01-04,
+TASK-008,Mobile Responsive Design,Grace Lee,Done,Story,Medium,5,Sprint 15,2024-01-06,2024-01-13
+TASK-009,Error Handling Improvements,Henry Taylor,To Do,Bug,Medium,3,Sprint 15,2024-01-10,
+TASK-010,Third-party Integration,Ivy Chen,Blocked,Story,High,8,Sprint 15,2024-01-07,
+TASK-011,Code Refactoring,Jack Robinson,Done,Task,Low,3,Sprint 15,2024-01-09,2024-01-16
+TASK-012,User Feedback Implementation,Kate Anderson,In Progress,Story,Medium,5,Sprint 15,2024-01-11,
