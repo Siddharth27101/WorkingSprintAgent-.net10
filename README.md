@@ -1,27 +1,50 @@
-# Working Sprint Agent
+# Working Sprint Agent (.NET 10)
 
-A .NET 8 ASP.NET Core API that reads sprint data from CSV, generates rule-based or OpenAI-assisted insights, and creates HTML or PowerPoint presentations.
+An ASP.NET Core .NET 10 API that accepts sprint data as a CSV upload, calculates sprint metrics, asks OpenAI for a concise summary, and returns a stakeholder-ready PowerPoint presentation. Swagger UI is included for an easy browser demonstration.
 
 ## Requirements
 
-- Visual Studio 2022 17.8 or later with the **ASP.NET and web development** workload, or the .NET 8 SDK
-- An OpenAI API key is optional; the application uses local rule-based insights when no key is configured
+- [.NET 10 SDK](https://dotnet.microsoft.com/en-us/download/dotnet/10.0)
+- Visual Studio 2026 with the **ASP.NET and web development** workload, or another editor that supports .NET 10
+- Internet access for the initial NuGet restore and for OpenAI requests
+- An OpenAI API key for AI-generated insights
 
-The project uses only the ASP.NET Core shared framework, so it does not require third-party NuGet packages.
+## Configure the OpenAI key
+
+User secrets are recommended because they keep the key out of source control:
+
+```bash
+dotnet user-secrets set "OpenAI:ApiKey" "your-openai-api-key"
+```
+
+In Visual Studio, right-click the project and select **Manage User Secrets**, then add:
+
+```json
+{
+  "OpenAI": {
+    "ApiKey": "your-openai-api-key"
+  }
+}
+```
+
+You can also use the conventional OpenAI environment variable:
+
+```bash
+export OPENAI_API_KEY="your-openai-api-key"
+```
+
+The ASP.NET Core-style `OpenAI__ApiKey` environment variable is supported as well.
+
+Never commit a real API key. Restart the API after changing its configuration. If no key is configured—or if OpenAI is unavailable—the API still works using local fallback insights.
 
 ## Run in Visual Studio
 
-1. Open `WorkingSprintAgent.csproj` in Visual Studio.
-2. Select either `WorkingSprintAgent (HTTP)` or `WorkingSprintAgent (HTTPS)`.
-3. Run the project. The browser opens the landing page automatically.
+1. Open `WorkingSprintAgent.csproj` in Visual Studio 2026.
+2. Restore NuGet packages if Visual Studio does not do so automatically.
+3. Select `WorkingSprintAgent (HTTPS)` or `WorkingSprintAgent (HTTP)`.
+4. Run the project. Visual Studio opens Swagger at `/swagger`.
 
-Do not put secrets in `appsettings.json`. To enable OpenAI locally, use user secrets:
-
-```bash
-dotnet user-secrets set "OpenAI:ApiKey" "your-api-key"
-```
-
-## Command-line quick start
+Command-line alternative:
 
 ```bash
 dotnet restore
@@ -29,45 +52,66 @@ dotnet build
 dotnet run --launch-profile "WorkingSprintAgent (HTTP)"
 ```
 
-The HTTP profile listens at `http://localhost:5080`.
+Swagger is then available at `http://localhost:5080/swagger`.
 
-Check application health:
+## Demonstrate CSV to PowerPoint in Swagger
 
-```bash
-curl http://localhost:5080/api/sprintreport/health
+1. Open `GET /api/SprintReport/sample-csv`, select **Try it out**, and download the sample CSV.
+2. Open `POST /api/SprintReport/preview`, select **Try it out**, upload the CSV, and execute it. This displays parsed metrics, the generated summary, and AI token metadata.
+3. Open `POST /api/SprintReport/generate`, select **Try it out**, upload the CSV, and keep `outputFormat` set to `powerpoint`.
+4. Optionally choose `professional`, `modern`, `corporate`, or `minimal`, then execute the request.
+5. Download the returned `.pptx` file from the Swagger response.
+
+The complete processing flow is:
+
+```text
+CSV upload
+  -> parse and validate tasks
+  -> calculate sprint metrics
+  -> optimize the prompt
+  -> request structured OpenAI insights
+  -> create an 8-slide PowerPoint
+  -> return the .pptx download
 ```
 
-Generate an HTML report:
+## CSV columns
 
-```bash
-curl -X POST http://localhost:5080/api/sprintreport/generate \
-  -F "csvFile=@sample-data/dummy-sprint.csv" \
-  -F "sprintName=Sprint 15" \
-  -F "outputFormat=html" \
-  --output sprint-report.html
-```
+Required columns:
 
-Generate a PowerPoint report by changing `outputFormat` to `powerpoint` and the output filename to `sprint-report.pptx`.
+- `TaskId`
+- `Title`
+- `Status`
+- `Assignee`
+
+Optional columns:
+
+- `Type`
+- `Priority`
+- `StoryPoints`
+- `SprintName`
+- `StartDate`
+- `EndDate`
+
+Column names are case-insensitive and common aliases are accepted. `GET /api/SprintReport/csv-format` returns the complete format guide and sample data. Uploads must be `.csv` files no larger than 10 MB.
 
 ## Main endpoints
 
-- `POST /api/sprintreport/generate` — Generate an HTML or PowerPoint presentation
-- `POST /api/sprintreport/preview` — Preview metrics and insights
-- `GET /api/sprintreport/csv-format` — View CSV requirements and examples
-- `GET /api/sprintreport/health` — Check system health
-- `GET /api/sprintreport/ai-status` — Check AI/fallback status
-- `GET /api/sprintreport/token-usage` — View token and cost data
-- `GET /api/sprintreport/cost-dashboard` — View cost-monitoring data
-- `GET /api/sprintreport/usage-analytics` — View usage analytics
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/SprintReport/sample-csv` | Download a demonstration CSV |
+| GET | `/api/SprintReport/csv-format` | View supported columns and examples |
+| GET | `/api/SprintReport/health` | Check API and AI configuration status |
+| GET | `/api/SprintReport/ai-status` | Check OpenAI/fallback mode |
+| GET | `/api/SprintReport/templates` | List presentation templates |
+| POST | `/api/SprintReport/preview` | Upload CSV and preview metrics/AI insights as JSON |
+| POST | `/api/SprintReport/generate` | Upload CSV and download PowerPoint or HTML |
 
-## CSV format
+The OpenAI integration calls the Chat Completions REST endpoint with JSON output instructions, tracks token usage and estimated cost, caches successful responses, and falls back safely if an OpenAI call fails.
 
-Required columns are `TaskId`, `Title`, `Status`, and `Assignee`. Optional columns include `Type`, `Priority`, `StoryPoints`, `SprintName`, `StartDate`, and `EndDate`. Column aliases and examples are available from `/api/sprintreport/csv-format`.
+## References
 
-## Architecture
+- [Download .NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0)
+- [Swashbuckle and ASP.NET Core](https://learn.microsoft.com/en-us/aspnet/core/tutorials/getting-started-with-swashbuckle)
+- [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
 
-```text
-CSV upload -> Parse and validate -> Compute metrics -> Generate insights -> Build presentation
-```
-
-When `OpenAI:ApiKey` is empty, all report-generation endpoints remain functional and use `MockInsightGenerationService`. When configured, `OpenAIService` calls the OpenAI REST API directly, tracks token usage, applies daily budget limits, and falls back automatically if a request fails.
+Content was rephrased for compliance with licensing restrictions.
