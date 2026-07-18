@@ -177,7 +177,7 @@ public class InMemoryCostMonitoringService : ICostMonitoringService
                     ? TimeSpan.FromMilliseconds(todayUsage.Average(u => u.ResponseTime.TotalMilliseconds))
                     : TimeSpan.Zero,
                 RequestsPerHour = todayUsage.Count > 0 ? todayUsage.Count / Math.Max(1, (int)(now - today).TotalHours) : 0,
-                CostEfficiency = todayUsage.Count > 0 ? dashboard.TodayCost / todayUsage.Count : 0,
+                CostEfficiency = todayUsage.Count > 0 ? todayUsage.Sum(u => u.EstimatedCost) / todayUsage.Count : 0,
                 SuccessRate = 0.95, // Would be calculated from actual success/failure data
                 OptimizationScore = GetOptimizationScore(todayUsage)
             }
@@ -327,7 +327,8 @@ public class InMemoryCostMonitoringService : ICostMonitoringService
         for (int i = 1; i <= days; i++)
         {
             var date = currentDate.AddDays(i);
-            var dailyCost = dailyAverageCost * (1 + (Random.Shared.NextDouble() - 0.5) * 0.1); // Add small random variation
+            var variation = 1m + (((decimal)Random.Shared.NextDouble() - 0.5m) * 0.1m);
+            var dailyCost = dailyAverageCost * variation;
 
             prediction.ForecastPoints.Add(new CostForecastPoint
             {

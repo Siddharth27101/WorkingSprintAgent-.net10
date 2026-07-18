@@ -1,0 +1,28 @@
+# .NET build outputs
+bin/
+obj/
+
+# Visual Studio user and workspace files
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Test and coverage outputs
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+
+# Local secrets and environment overrides
+.env
+.env.*
+!appsettings.json
+!appsettings.Development.json
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

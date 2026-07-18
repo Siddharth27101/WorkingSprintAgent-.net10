@@ -1,10 +1,11 @@
-using WorkingSprintAgent.Models;
+using System.Net;
 using System.Text;
+using WorkingSprintAgent.Models;
 
 namespace WorkingSprintAgent.Services;
 
 /// <summary>
-/// Enhanced presentation builder service supporting multiple output formats
+/// Builds PowerPoint and standalone HTML sprint presentations.
 /// </summary>
 public class PresentationBuilderService : IPresentationBuilderService
 {
@@ -19,36 +20,29 @@ public class PresentationBuilderService : IPresentationBuilderService
         _powerPointService = powerPointService;
     }
 
-    public byte[] BuildPowerPointPresentation(SprintMetrics metrics, SprintInsights insights, PresentationOptions? options = null)
+    public byte[] BuildPowerPointPresentation(
+        SprintMetrics metrics,
+        SprintInsights insights,
+        PresentationOptions? options = null)
     {
         options ??= new PresentationOptions();
-        
-        _logger.LogInformation("Building PowerPoint presentation for sprint '{SprintName}' using template '{Template}'", 
-            metrics.SprintName, options.Template);
 
-        try
-        {
-            return _powerPointService.CreatePresentationFromTemplate(metrics, insights, options);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to create PowerPoint presentation for sprint '{SprintName}'. Falling back to HTML.", metrics.SprintName);
-            
-            // Fallback to HTML if PowerPoint generation fails
-            return BuildPresentation(metrics, insights);
-        }
+        _logger.LogInformation(
+            "Building PowerPoint presentation for sprint '{SprintName}' using template '{Template}'",
+            metrics.SprintName,
+            options.Template);
+
+        // Do not return HTML from this method: callers label these bytes as a .pptx file.
+        return _powerPointService.CreatePresentationFromTemplate(metrics, insights, options);
     }
 
     public byte[] BuildPresentation(SprintMetrics metrics, SprintInsights insights)
     {
         _logger.LogInformation("Building HTML presentation for sprint '{SprintName}'", metrics.SprintName);
 
-        var html = BuildHTMLPresentation(metrics, insights);
-        var htmlBytes = Encoding.UTF8.GetBytes(html);
-        
-        _logger.LogInformation("Generated HTML presentation with {Size} bytes", htmlBytes.Length);
-        
-        return htmlBytes;
+        var bytes = Encoding.UTF8.GetBytes(BuildHtmlPresentation(metrics, insights));
+        _logger.LogInformation("Generated HTML presentation with {Size} bytes", bytes.Length);
+        return bytes;
     }
 
     public PresentationSummary GetPresentationSummary(SprintMetrics metrics, SprintInsights insights)
@@ -56,7 +50,7 @@ public class PresentationBuilderService : IPresentationBuilderService
         var slideTopics = new List<string>
         {
             "Title Slide",
-            "Executive Summary", 
+            "Executive Summary",
             "Sprint Metrics Overview",
             "Task Completion Analysis",
             "Team Performance",
@@ -65,18 +59,7 @@ public class PresentationBuilderService : IPresentationBuilderService
             "Next Sprint Focus"
         };
 
-        var chartTypes = new List<string>
-        {
-            "Completion Rate Chart",
-            "Task Status Distribution", 
-            "Team Performance Metrics"
-        };
-
-        if (metrics.TasksByPriority.Any())
-            chartTypes.Add("Priority Breakdown");
-
-        if (metrics.TotalStoryPoints > 0)
-            chartTypes.Add("Story Points Progress");
+        var chartTypes = new List<string>();
 
         return new PresentationSummary
         {
@@ -84,7 +67,7 @@ public class PresentationBuilderService : IPresentationBuilderService
             SlideCount = slideTopics.Count,
             SlideTopics = slideTopics,
             ChartTypes = chartTypes,
-            EstimatedViewingTimeMinutes = Math.Max(5, slideTopics.Count * 2), // 2 minutes per slide minimum
+            EstimatedViewingTimeMinutes = Math.Max(5, slideTopics.Count * 2),
             GeneratedAt = DateTime.UtcNow,
             Template = "Professional",
             EstimatedFileSizeBytes = EstimateFileSizeBytes(metrics, insights)
@@ -95,647 +78,233 @@ public class PresentationBuilderService : IPresentationBuilderService
     {
         return new List<PresentationTemplate>
         {
-            new PresentationTemplate
+            new()
             {
                 Id = "professional",
                 Name = "Professional",
                 Description = "Clean, corporate design suitable for stakeholder presentations",
-                Features = new List<string> { "Professional color scheme", "Clear charts", "Executive summary focus" },
-                RequiresCompanyBranding = false
+                Features = new List<string> { "Blue accent palette", "Executive summary", "Readable metrics" }
             },
-            new PresentationTemplate
+            new()
             {
                 Id = "modern",
                 Name = "Modern",
                 Description = "Contemporary design with vibrant colors and modern typography",
-                Features = new List<string> { "Modern typography", "Gradient backgrounds", "Interactive elements" },
-                RequiresCompanyBranding = false
+                Features = new List<string> { "Purple accent palette", "Contemporary typography", "Readable metrics" }
             },
-            new PresentationTemplate
+            new()
             {
                 Id = "corporate",
                 Name = "Corporate",
                 Description = "Formal template with company branding integration",
-                Features = new List<string> { "Company logo integration", "Brand color compliance", "Formal layout" },
+                Features = new List<string> { "Navy accent palette", "Company name on title slide", "Formal layout" },
                 RequiresCompanyBranding = true
             },
-            new PresentationTemplate
+            new()
             {
                 Id = "minimal",
                 Name = "Minimal",
                 Description = "Clean, distraction-free design focusing on content",
-                Features = new List<string> { "Minimal design", "Focus on content", "High readability" },
-                RequiresCompanyBranding = false
+                Features = new List<string> { "Monochrome palette", "Content-focused layout", "High readability" }
             }
         };
     }
 
-    #region Private Helper Methods
-    private string BuildHTMLPresentation(SprintMetrics metrics, SprintInsights insights)
+    private static string BuildHtmlPresentation(SprintMetrics metrics, SprintInsights insights)
     {
         var html = new StringBuilder();
-        
-        html.Append("<!DOCTYPE html>");
-        html.Append("<html lang=\"en\">");
-        html.Append("<head>");
-        html.Append("<meta charset=\"UTF-8\">");
-        html.Append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">");
-        html.Append("<title>Sprint Report - ");
-        html.Append(EscapeHtml(metrics.SprintName));
-        html.Append("</title>");
-        html.Append(GetPresentationStyles());
-        html.Append("</head>");
-        html.Append("<body>");
-        
-        // Title slide
-        html.Append("<div class=\"slide title-slide\">");
-        html.Append("<h1>Sprint Report</h1>");
-        html.Append("<h2>");
-        html.Append(EscapeHtml(metrics.SprintName));
-        html.Append("</h2>");
-        html.Append("<p class=\"subtitle\">Generated on ");
-        html.Append(DateTime.Now.ToString("MMMM dd, yyyy"));
-        html.Append("</p>");
-        html.Append("</div>");
+        html.AppendLine("<!DOCTYPE html>")
+            .AppendLine("<html lang=\"en\">")
+            .AppendLine("<head>")
+            .AppendLine("<meta charset=\"UTF-8\">")
+            .AppendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">")
+            .Append("<title>Sprint Report - ").Append(EscapeHtml(metrics.SprintName)).AppendLine("</title>")
+            .AppendLine(GetPresentationStyles())
+            .AppendLine("</head>")
+            .AppendLine("<body>");
 
-        // Executive Summary slide
-        html.Append("<div class=\"slide\">");
-        html.Append("<h2>Executive Summary</h2>");
-        html.Append("<div class=\"content\">");
-        html.Append("<p class=\"summary\">");
-        html.Append(EscapeHtml(insights.ExecutiveSummary));
-        html.Append("</p>");
-        
-        html.Append("<div class=\"metrics-grid\">");
-        html.Append("<div class=\"metric-card\">");
-        html.Append("<div class=\"metric-value\">");
-        html.Append(metrics.CompletionRatePercent.ToString("F1"));
-        html.Append("%</div>");
-        html.Append("<div class=\"metric-label\">Completion Rate</div>");
-        html.Append("</div>");
-        
-        html.Append("<div class=\"metric-card\">");
-        html.Append("<div class=\"metric-value\">");
-        html.Append(metrics.CompletedTasks);
-        html.Append("/");
-        html.Append(metrics.TotalTasks);
-        html.Append("</div>");
-        html.Append("<div class=\"metric-label\">Tasks Completed</div>");
-        html.Append("</div>");
-        
-        html.Append("<div class=\"metric-card\">");
-        html.Append("<div class=\"metric-value\">");
-        html.Append(metrics.CompletedStoryPoints.ToString("F1"));
-        html.Append("</div>");
-        html.Append("<div class=\"metric-label\">Story Points</div>");
-        html.Append("</div>");
-        
-        html.Append("<div class=\"metric-card\">");
-        html.Append("<div class=\"metric-value\">");
-        html.Append(metrics.BlockedTasks);
-        html.Append("</div>");
-        html.Append("<div class=\"metric-label\">Blocked Tasks</div>");
-        html.Append("</div>");
-        html.Append("</div>");
-        html.Append("</div>");
-        html.Append("</div>");
+        AppendTitleSlide(html, metrics);
+        AppendExecutiveSummarySlide(html, metrics, insights);
+        AppendListSlide(html, "Key Highlights", "highlights", insights.KeyHighlights);
+        AppendTeamPerformanceSlide(html, metrics, insights);
 
-        // Key Highlights slide
-        html.Append("<div class=\"slide\">");
-        html.Append("<h2>Key Highlights</h2>");
-        html.Append("<div class=\"content\">");
-        html.Append("<ul class=\"highlights\">");
-        foreach (var highlight in insights.KeyHighlights)
+        if (insights.RisksAndBlockers.Any() || metrics.BlockedTaskTitles.Any())
         {
-            html.Append("<li>");
-            html.Append(EscapeHtml(highlight));
-            html.Append("</li>");
-        }
-        html.Append("</ul>");
-        html.Append("</div>");
-        html.Append("</div>");
-
-        // Team Performance slide
-        html.Append("<div class=\"slide\">");
-        html.Append("<h2>Team Performance</h2>");
-        html.Append("<div class=\"content\">");
-        html.Append("<p class=\"performance-narrative\">");
-        html.Append(EscapeHtml(insights.TeamPerformanceNarrative));
-        html.Append("</p>");
-        
-        if (metrics.WorkloadByAssignee.Any())
-        {
-            html.Append("<div class=\"team-table\">");
-            html.Append("<table>");
-            html.Append("<thead>");
-            html.Append("<tr>");
-            html.Append("<th>Team Member</th>");
-            html.Append("<th>Total Tasks</th>");
-            html.Append("<th>Completed</th>");
-            html.Append("<th>Story Points</th>");
-            html.Append("<th>Completion %</th>");
-            html.Append("</tr>");
-            html.Append("</thead>");
-            html.Append("<tbody>");
-            
-            foreach (var assignee in metrics.WorkloadByAssignee)
-            {
-                var completionRate = assignee.TotalTasks > 0 
-                    ? (assignee.CompletedTasks * 100.0 / assignee.TotalTasks) 
-                    : 0;
-                
-                html.Append("<tr>");
-                html.Append("<td>");
-                html.Append(EscapeHtml(assignee.Assignee));
-                html.Append("</td>");
-                html.Append("<td>");
-                html.Append(assignee.TotalTasks);
-                html.Append("</td>");
-                html.Append("<td>");
-                html.Append(assignee.CompletedTasks);
-                html.Append("</td>");
-                html.Append("<td>");
-                html.Append(assignee.StoryPoints.ToString("F1"));
-                html.Append("</td>");
-                html.Append("<td>");
-                html.Append(completionRate.ToString("F0"));
-                html.Append("%</td>");
-                html.Append("</tr>");
-            }
-            
-            html.Append("</tbody>");
-            html.Append("</table>");
-            html.Append("</div>");
-        }
-        html.Append("</div>");
-        html.Append("</div>");
-
-        // Risks and Blockers slide
-        if (insights.RisksAndBlockers.Any())
-        {
-            html.Append("<div class=\"slide\">");
-            html.Append("<h2>Risks & Blockers</h2>");
-            html.Append("<div class=\"content\">");
-            html.Append("<ul class=\"risks\">");
-            foreach (var risk in insights.RisksAndBlockers)
-            {
-                html.Append("<li>");
-                html.Append(EscapeHtml(risk));
-                html.Append("</li>");
-            }
-            html.Append("</ul>");
-            
-            if (metrics.BlockedTaskTitles.Any())
-            {
-                html.Append("<h3>Blocked Items</h3>");
-                html.Append("<ul class=\"blocked-tasks\">");
-                foreach (var blockedTask in metrics.BlockedTaskTitles)
-                {
-                    html.Append("<li>");
-                    html.Append(EscapeHtml(blockedTask));
-                    html.Append("</li>");
-                }
-                html.Append("</ul>");
-            }
-            html.Append("</div>");
-            html.Append("</div>");
+            AppendRisksSlide(html, metrics, insights);
         }
 
-        // Recommendations slide
-        html.Append("<div class=\"slide\">");
-        html.Append("<h2>Recommendations</h2>");
-        html.Append("<div class=\"content\">");
-        html.Append("<ul class=\"recommendations\">");
-        foreach (var recommendation in insights.Recommendations)
-        {
-            html.Append("<li>");
-            html.Append(EscapeHtml(recommendation));
-            html.Append("</li>");
-        }
-        html.Append("</ul>");
-        html.Append("</div>");
-        html.Append("</div>");
+        AppendListSlide(html, "Recommendations", "recommendations", insights.Recommendations);
+        AppendTextSlide(html, "Next Sprint Focus", "next-focus", insights.NextSprintFocus);
 
-        // Next Sprint Focus slide
-        html.Append("<div class=\"slide\">");
-        html.Append("<h2>Next Sprint Focus</h2>");
-        html.Append("<div class=\"content\">");
-        html.Append("<p class=\"next-focus\">");
-        html.Append(EscapeHtml(insights.NextSprintFocus));
-        html.Append("</p>");
-        html.Append("</div>");
-        html.Append("</div>");
-
-        html.Append("</body>");
-        html.Append("</html>");
-
+        html.AppendLine("</body>").AppendLine("</html>");
         return html.ToString();
     }
 
-    private static long EstimateFileSizeBytes(SprintMetrics metrics, SprintInsights insights)
+    private static void AppendTitleSlide(StringBuilder html, SprintMetrics metrics)
     {
-        // Rough estimation based on content
-        var baseSize = 50000; // Base PowerPoint size
-        var contentSize = (insights.ExecutiveSummary.Length + 
-                          insights.KeyHighlights.Sum(h => h.Length) +
-                          insights.RisksAndBlockers.Sum(r => r.Length) +
-                          insights.Recommendations.Sum(r => r.Length)) * 10; // Estimate formatting overhead
-        
-        var teamSize = metrics.WorkloadByAssignee.Count * 500; // Team data
-        var chartsSize = 20000; // Estimated chart data
-        
-        return baseSize + contentSize + teamSize + chartsSize;
+        html.AppendLine("<section class=\"slide title-slide\">")
+            .AppendLine("<h1>Sprint Report</h1>")
+            .Append("<h2>").Append(EscapeHtml(metrics.SprintName)).AppendLine("</h2>")
+            .Append("<p class=\"subtitle\">Generated on ")
+            .Append(DateTime.Now.ToString("MMMM dd, yyyy"))
+            .AppendLine("</p></section>");
     }
-        html.Append("<html lang=\"en\">");
-        html.Append("<head>");
-        html.Append("<meta charset=\"UTF-8\">");
-        html.Append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">");
-        html.Append("<title>Sprint Report - ");
-        html.Append(EscapeHtml(metrics.SprintName));
-        html.Append("</title>");
-        html.Append(GetPresentationStyles());
-        html.Append("</head>");
-        html.Append("<body>");
-        
-        // Title slide
-        html.Append("<div class=\"slide title-slide\">");
-        html.Append("<h1>Sprint Report</h1>");
-        html.Append("<h2>");
-        html.Append(EscapeHtml(metrics.SprintName));
-        html.Append("</h2>");
-        html.Append("<p class=\"subtitle\">Generated on ");
-        html.Append(DateTime.Now.ToString("MMMM dd, yyyy"));
-        html.Append("</p>");
-        html.Append("</div>");
 
-        // Executive Summary slide
-        html.Append("<div class=\"slide\">");
-        html.Append("<h2>Executive Summary</h2>");
-        html.Append("<div class=\"content\">");
-        html.Append("<p class=\"summary\">");
-        html.Append(EscapeHtml(insights.ExecutiveSummary));
-        html.Append("</p>");
-        
-        html.Append("<div class=\"metrics-grid\">");
-        html.Append("<div class=\"metric-card\">");
-        html.Append("<div class=\"metric-value\">");
-        html.Append(metrics.CompletionRatePercent.ToString("F1"));
-        html.Append("%</div>");
-        html.Append("<div class=\"metric-label\">Completion Rate</div>");
-        html.Append("</div>");
-        
-        html.Append("<div class=\"metric-card\">");
-        html.Append("<div class=\"metric-value\">");
-        html.Append(metrics.CompletedTasks);
-        html.Append("/");
-        html.Append(metrics.TotalTasks);
-        html.Append("</div>");
-        html.Append("<div class=\"metric-label\">Tasks Completed</div>");
-        html.Append("</div>");
-        
-        html.Append("<div class=\"metric-card\">");
-        html.Append("<div class=\"metric-value\">");
-        html.Append(metrics.CompletedStoryPoints.ToString("F1"));
-        html.Append("</div>");
-        html.Append("<div class=\"metric-label\">Story Points</div>");
-        html.Append("</div>");
-        
-        html.Append("<div class=\"metric-card\">");
-        html.Append("<div class=\"metric-value\">");
-        html.Append(metrics.BlockedTasks);
-        html.Append("</div>");
-        html.Append("<div class=\"metric-label\">Blocked Tasks</div>");
-        html.Append("</div>");
-        html.Append("</div>");
-        html.Append("</div>");
-        html.Append("</div>");
+    private static void AppendExecutiveSummarySlide(
+        StringBuilder html,
+        SprintMetrics metrics,
+        SprintInsights insights)
+    {
+        html.AppendLine("<section class=\"slide\"><h2>Executive Summary</h2><div class=\"content\">")
+            .Append("<p class=\"summary\">").Append(EscapeHtml(insights.ExecutiveSummary)).AppendLine("</p>")
+            .AppendLine("<div class=\"metrics-grid\">");
 
-        // Key Highlights slide
-        html.Append("<div class=\"slide\">");
-        html.Append("<h2>Key Highlights</h2>");
-        html.Append("<div class=\"content\">");
-        html.Append("<ul class=\"highlights\">");
-        foreach (var highlight in insights.KeyHighlights)
+        AppendMetricCard(html, $"{metrics.CompletionRatePercent:F1}%", "Completion Rate");
+        AppendMetricCard(html, $"{metrics.CompletedTasks}/{metrics.TotalTasks}", "Tasks Completed");
+        AppendMetricCard(html, $"{metrics.CompletedStoryPoints:F1}", "Story Points");
+        AppendMetricCard(html, metrics.BlockedTasks.ToString(), "Blocked Tasks");
+
+        html.AppendLine("</div></div></section>");
+    }
+
+    private static void AppendMetricCard(StringBuilder html, string value, string label)
+    {
+        html.AppendLine("<div class=\"metric-card\">")
+            .Append("<div class=\"metric-value\">").Append(EscapeHtml(value)).AppendLine("</div>")
+            .Append("<div class=\"metric-label\">").Append(EscapeHtml(label)).AppendLine("</div></div>");
+    }
+
+    private static void AppendListSlide(
+        StringBuilder html,
+        string title,
+        string cssClass,
+        IEnumerable<string> items)
+    {
+        html.AppendLine("<section class=\"slide\">")
+            .Append("<h2>").Append(EscapeHtml(title)).AppendLine("</h2><div class=\"content\">")
+            .Append("<ul class=\"").Append(cssClass).AppendLine("\">");
+
+        foreach (var item in items)
         {
-            html.Append("<li>");
-            html.Append(EscapeHtml(highlight));
-            html.Append("</li>");
+            html.Append("<li>").Append(EscapeHtml(item)).AppendLine("</li>");
         }
-        html.Append("</ul>");
-        html.Append("</div>");
-        html.Append("</div>");
 
-        // Team Performance slide
-        html.Append("<div class=\"slide\">");
-        html.Append("<h2>Team Performance</h2>");
-        html.Append("<div class=\"content\">");
-        html.Append("<p class=\"performance-narrative\">");
-        html.Append(EscapeHtml(insights.TeamPerformanceNarrative));
-        html.Append("</p>");
-        
+        html.AppendLine("</ul></div></section>");
+    }
+
+    private static void AppendTextSlide(StringBuilder html, string title, string cssClass, string text)
+    {
+        html.AppendLine("<section class=\"slide\">")
+            .Append("<h2>").Append(EscapeHtml(title)).AppendLine("</h2><div class=\"content\">")
+            .Append("<p class=\"").Append(cssClass).Append("\">")
+            .Append(EscapeHtml(text)).AppendLine("</p></div></section>");
+    }
+
+    private static void AppendTeamPerformanceSlide(
+        StringBuilder html,
+        SprintMetrics metrics,
+        SprintInsights insights)
+    {
+        html.AppendLine("<section class=\"slide\"><h2>Team Performance</h2><div class=\"content\">")
+            .Append("<p class=\"performance-narrative\">")
+            .Append(EscapeHtml(insights.TeamPerformanceNarrative))
+            .AppendLine("</p>");
+
         if (metrics.WorkloadByAssignee.Any())
         {
-            html.Append("<div class=\"team-table\">");
-            html.Append("<table>");
-            html.Append("<thead>");
-            html.Append("<tr>");
-            html.Append("<th>Team Member</th>");
-            html.Append("<th>Total Tasks</th>");
-            html.Append("<th>Completed</th>");
-            html.Append("<th>Story Points</th>");
-            html.Append("<th>Completion %</th>");
-            html.Append("</tr>");
-            html.Append("</thead>");
-            html.Append("<tbody>");
-            
+            html.AppendLine("<div class=\"team-table\"><table><thead><tr>")
+                .AppendLine("<th>Team Member</th><th>Total Tasks</th><th>Completed</th><th>Story Points</th><th>Completion %</th>")
+                .AppendLine("</tr></thead><tbody>");
+
             foreach (var assignee in metrics.WorkloadByAssignee)
             {
-                var completionRate = assignee.TotalTasks > 0 
-                    ? (assignee.CompletedTasks * 100.0 / assignee.TotalTasks) 
+                var completionRate = assignee.TotalTasks > 0
+                    ? assignee.CompletedTasks * 100.0 / assignee.TotalTasks
                     : 0;
-                
-                html.Append("<tr>");
-                html.Append("<td>");
-                html.Append(EscapeHtml(assignee.Assignee));
-                html.Append("</td>");
-                html.Append("<td>");
-                html.Append(assignee.TotalTasks);
-                html.Append("</td>");
-                html.Append("<td>");
-                html.Append(assignee.CompletedTasks);
-                html.Append("</td>");
-                html.Append("<td>");
-                html.Append(assignee.StoryPoints.ToString("F1"));
-                html.Append("</td>");
-                html.Append("<td>");
-                html.Append(completionRate.ToString("F0"));
-                html.Append("%</td>");
-                html.Append("</tr>");
-            }
-            
-            html.Append("</tbody>");
-            html.Append("</table>");
-            html.Append("</div>");
-        }
-        html.Append("</div>");
-        html.Append("</div>");
 
-        // Risks and Blockers slide
-        if (insights.RisksAndBlockers.Any())
-        {
-            html.Append("<div class=\"slide\">");
-            html.Append("<h2>Risks & Blockers</h2>");
-            html.Append("<div class=\"content\">");
-            html.Append("<ul class=\"risks\">");
-            foreach (var risk in insights.RisksAndBlockers)
-            {
-                html.Append("<li>");
-                html.Append(EscapeHtml(risk));
-                html.Append("</li>");
+                html.AppendLine("<tr>")
+                    .Append("<td>").Append(EscapeHtml(assignee.Assignee)).AppendLine("</td>")
+                    .Append("<td>").Append(assignee.TotalTasks).AppendLine("</td>")
+                    .Append("<td>").Append(assignee.CompletedTasks).AppendLine("</td>")
+                    .Append("<td>").Append(assignee.StoryPoints.ToString("F1")).AppendLine("</td>")
+                    .Append("<td>").Append(completionRate.ToString("F0")).AppendLine("%</td></tr>");
             }
-            html.Append("</ul>");
-            
-            if (metrics.BlockedTaskTitles.Any())
-            {
-                html.Append("<h3>Blocked Items</h3>");
-                html.Append("<ul class=\"blocked-tasks\">");
-                foreach (var blockedTask in metrics.BlockedTaskTitles)
-                {
-                    html.Append("<li>");
-                    html.Append(EscapeHtml(blockedTask));
-                    html.Append("</li>");
-                }
-                html.Append("</ul>");
-            }
-            html.Append("</div>");
-            html.Append("</div>");
+
+            html.AppendLine("</tbody></table></div>");
         }
 
-        // Recommendations slide
-        html.Append("<div class=\"slide\">");
-        html.Append("<h2>Recommendations</h2>");
-        html.Append("<div class=\"content\">");
-        html.Append("<ul class=\"recommendations\">");
-        foreach (var recommendation in insights.Recommendations)
-        {
-            html.Append("<li>");
-            html.Append(EscapeHtml(recommendation));
-            html.Append("</li>");
-        }
-        html.Append("</ul>");
-        html.Append("</div>");
-        html.Append("</div>");
-
-        // Next Sprint Focus slide
-        html.Append("<div class=\"slide\">");
-        html.Append("<h2>Next Sprint Focus</h2>");
-        html.Append("<div class=\"content\">");
-        html.Append("<p class=\"next-focus\">");
-        html.Append(EscapeHtml(insights.NextSprintFocus));
-        html.Append("</p>");
-        html.Append("</div>");
-        html.Append("</div>");
-
-        html.Append("</body>");
-        html.Append("</html>");
-
-        var htmlBytes = Encoding.UTF8.GetBytes(html.ToString());
-        
-        _logger.LogInformation("Generated HTML presentation with {Size} bytes", htmlBytes.Length);
-        
-        return htmlBytes;
+        html.AppendLine("</div></section>");
     }
 
-    private static string EscapeHtml(string input)
+    private static void AppendRisksSlide(
+        StringBuilder html,
+        SprintMetrics metrics,
+        SprintInsights insights)
     {
-        if (string.IsNullOrEmpty(input)) return string.Empty;
-        
-        return input
-            .Replace("&", "&amp;")
-            .Replace("<", "&lt;")
-            .Replace(">", "&gt;")
-            .Replace("\"", "&quot;")
-            .Replace("'", "&#39;");
+        html.AppendLine("<section class=\"slide\"><h2>Risks &amp; Blockers</h2><div class=\"content\">")
+            .AppendLine("<ul class=\"risks\">");
+
+        foreach (var risk in insights.RisksAndBlockers)
+        {
+            html.Append("<li>").Append(EscapeHtml(risk)).AppendLine("</li>");
+        }
+
+        html.AppendLine("</ul>");
+
+        if (metrics.BlockedTaskTitles.Any())
+        {
+            html.AppendLine("<h3>Blocked Items</h3><ul class=\"blocked-tasks\">");
+            foreach (var blockedTask in metrics.BlockedTaskTitles)
+            {
+                html.Append("<li>").Append(EscapeHtml(blockedTask)).AppendLine("</li>");
+            }
+
+            html.AppendLine("</ul>");
+        }
+
+        html.AppendLine("</div></section>");
+    }
+
+    private static string EscapeHtml(string? input) => WebUtility.HtmlEncode(input ?? string.Empty);
+
+    private static long EstimateFileSizeBytes(SprintMetrics metrics, SprintInsights insights)
+    {
+        var contentLength = insights.ExecutiveSummary.Length
+            + insights.KeyHighlights.Sum(item => item.Length)
+            + insights.RisksAndBlockers.Sum(item => item.Length)
+            + insights.Recommendations.Sum(item => item.Length);
+
+        return 50_000L + (contentLength * 10L) + (metrics.WorkloadByAssignee.Count * 500L) + 20_000L;
     }
 
     private static string GetPresentationStyles()
     {
-        return @"<style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        }
-        
-        .slide {
-            width: 100vw;
-            height: 100vh;
-            padding: 60px;
-            display: flex;
-            flex-direction: column;
-            page-break-after: always;
-            background: white;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        
-        .title-slide {
-            justify-content: center;
-            align-items: center;
-            text-align: center;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-        }
-        
-        .title-slide h1 {
-            font-size: 4rem;
-            margin-bottom: 20px;
-            font-weight: 300;
-        }
-        
-        .title-slide h2 {
-            font-size: 2.5rem;
-            margin-bottom: 20px;
-            opacity: 0.9;
-        }
-        
-        .subtitle {
-            font-size: 1.2rem;
-            opacity: 0.8;
-        }
-        
-        h2 {
-            font-size: 2.5rem;
-            color: #2c3e50;
-            margin-bottom: 40px;
-            border-bottom: 3px solid #3498db;
-            padding-bottom: 10px;
-        }
-        
-        .content {
-            flex: 1;
-            overflow: hidden;
-        }
-        
-        .summary {
-            font-size: 1.3rem;
-            color: #2c3e50;
-            margin-bottom: 40px;
-            padding: 20px;
-            background: #ecf0f1;
-            border-radius: 8px;
-            border-left: 5px solid #3498db;
-        }
-        
-        .metrics-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 30px;
-            margin-top: 30px;
-        }
-        
-        .metric-card {
-            background: linear-gradient(135deg, #3498db, #2980b9);
-            color: white;
-            padding: 30px;
-            border-radius: 12px;
-            text-align: center;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        
-        .metric-value {
-            font-size: 2.5rem;
-            font-weight: bold;
-            margin-bottom: 10px;
-        }
-        
-        .metric-label {
-            font-size: 1rem;
-            opacity: 0.9;
-        }
-        
-        .highlights, .risks, .recommendations {
-            list-style: none;
-            padding: 0;
-        }
-        
-        .highlights li, .risks li, .recommendations li {
-            background: #f8f9fa;
-            margin: 15px 0;
-            padding: 20px;
-            border-radius: 8px;
-            border-left: 5px solid #28a745;
-            font-size: 1.1rem;
-        }
-        
-        .risks li {
-            border-left-color: #dc3545;
-            background: #fff5f5;
-        }
-        
-        .recommendations li {
-            border-left-color: #ffc107;
-            background: #fffdf0;
-        }
-        
-        .performance-narrative, .next-focus {
-            font-size: 1.2rem;
-            color: #2c3e50;
-            margin-bottom: 30px;
-            padding: 20px;
-            background: #f8f9fa;
-            border-radius: 8px;
-        }
-        
-        .team-table {
-            margin-top: 30px;
-        }
-        
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            background: white;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        
-        th, td {
-            padding: 15px;
-            text-align: left;
-            border-bottom: 1px solid #ddd;
-        }
-        
-        th {
-            background: #34495e;
-            color: white;
-            font-weight: 600;
-        }
-        
-        tr:hover {
-            background: #f5f5f5;
-        }
-        
-        .blocked-tasks {
-            background: #fff5f5;
-            padding: 20px;
-            border-radius: 8px;
-            margin-top: 20px;
-        }
-        
-        .blocked-tasks li {
-            color: #dc3545;
-            margin: 10px 0;
-            font-weight: 500;
-        }
-        
-        @media print {
-            body { background: white; }
-            .slide { box-shadow: none; margin-bottom: 0; }
-        }
-        </style>";
+        return """
+            <style>
+            * { box-sizing: border-box; }
+            html, body { margin: 0; padding: 0; }
+            body { font-family: "Segoe UI", Arial, sans-serif; color: #243447; background: #e9eef5; }
+            .slide { width: 100%; min-height: 100vh; padding: 60px; background: #fff; page-break-after: always; }
+            .title-slide { display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; color: #fff; background: linear-gradient(135deg, #3264a8, #603c8f); }
+            .title-slide h1 { margin: 0 0 20px; font-size: 4rem; font-weight: 300; }
+            .title-slide h2 { border: 0; color: #fff; font-size: 2.5rem; }
+            .subtitle { font-size: 1.2rem; opacity: .85; }
+            h2 { margin: 0 0 40px; padding-bottom: 10px; border-bottom: 3px solid #3279b7; color: #243447; font-size: 2.5rem; }
+            .summary, .performance-narrative, .next-focus { padding: 20px; border-radius: 8px; background: #eef3f7; font-size: 1.2rem; }
+            .metrics-grid { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 24px; margin-top: 30px; }
+            .metric-card { padding: 30px 15px; border-radius: 12px; color: #fff; text-align: center; background: linear-gradient(135deg, #3279b7, #225685); }
+            .metric-value { font-size: 2.5rem; font-weight: 700; }
+            .highlights, .risks, .recommendations { padding: 0; list-style: none; }
+            .highlights li, .risks li, .recommendations li { margin: 15px 0; padding: 20px; border-left: 5px solid #27864b; border-radius: 8px; background: #f5f8fa; font-size: 1.1rem; }
+            .risks li { border-left-color: #c73535; background: #fff3f3; }
+            .recommendations li { border-left-color: #d49b00; background: #fff9e8; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { padding: 14px; border-bottom: 1px solid #d6dde5; text-align: left; }
+            th { color: #fff; background: #34495e; }
+            .blocked-tasks { padding: 20px 40px; border-radius: 8px; color: #a32424; background: #fff3f3; }
+            @media (max-width: 800px) { .slide { padding: 30px; } .metrics-grid { grid-template-columns: repeat(2, 1fr); } }
+            @media print { .slide { min-height: 100vh; } }
+            </style>
+            """;
     }
 }

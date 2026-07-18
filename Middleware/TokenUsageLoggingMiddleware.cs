@@ -140,7 +140,7 @@ public class TokenUsageLoggingMiddleware
             if (tokenLogger != null)
             {
                 // Log performance metrics for sprint report requests
-                var performanceMetrics = new Models.PerformanceMetrics
+                var performanceMetrics = new PerformanceMetrics
                 {
                     AverageResponseTime = duration,
                     RequestsPerHour = 1, // Would be calculated based on actual throughput
