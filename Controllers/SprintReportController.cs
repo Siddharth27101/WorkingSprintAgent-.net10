@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using WorkingSprintAgent.Models;
 using WorkingSprintAgent.Services;
-using System.ComponentModel.DataAnnotations;
 
 namespace WorkingSprintAgent.Controllers;
 
@@ -13,6 +12,13 @@ namespace WorkingSprintAgent.Controllers;
 [Tags("Sprint Reports")]
 public class SprintReportController : ControllerBase
 {
+    private const string SampleCsvContent =
+        "TaskId,Title,Status,Assignee,Type,Priority,StoryPoints,SprintName\n" +
+        "PROJ-123,Implement user login,Done,John Doe,Story,High,5,Sprint 2026-Q3\n" +
+        "PROJ-124,Fix login bug,In Progress,Jane Smith,Bug,Critical,2,Sprint 2026-Q3\n" +
+        "PROJ-125,Update user profile,To Do,Bob Johnson,Story,Medium,3,Sprint 2026-Q3\n" +
+        "PROJ-126,Database migration,Blocked,Alice Brown,Task,High,8,Sprint 2026-Q3\n";
+
     private readonly ICsvSprintDataService _csvService;
     private readonly IInsightGenerationService _insightService;
     private readonly IPresentationBuilderService _presentationService;
@@ -42,40 +48,36 @@ public class SprintReportController : ControllerBase
     /// <summary>
     /// Generate comprehensive sprint presentation with AI-powered insights
     /// </summary>
-    /// <param name="csvFile">CSV file containing sprint data with required columns: TaskId, Title, Status, Assignee</param>
-    /// <param name="sprintName">Optional custom sprint name</param>
-    /// <param name="outputFormat">Output format: powerpoint (default) or html</param>
-    /// <param name="template">Presentation template: professional, modern, corporate, minimal</param>
-    /// <param name="companyName">Company name for branding (optional)</param>
+    /// <param name="request">Multipart form containing the CSV file and presentation options</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Professional presentation file ready for stakeholders</returns>
     /// <response code="200">Successfully generated presentation</response>
     /// <response code="400">Invalid file or parameters</response>
     /// <response code="500">Internal server error</response>
     [HttpPost("generate")]
-    [ProducesResponseType(typeof(FileResult), 200)]
-    [ProducesResponseType(typeof(object), 400)]
-    [ProducesResponseType(typeof(object), 500)]
+    [Consumes("multipart/form-data")]
+    [ProducesResponseType(typeof(FileResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> GenerateSprintReport(
-        [Required] IFormFile csvFile,
-        [FromForm] string? sprintName = null,
-        [FromForm] string outputFormat = "powerpoint",
-        [FromForm] string template = "professional", 
-        [FromForm] string? companyName = null,
+        [FromForm] GenerateSprintReportRequest request,
         CancellationToken cancellationToken = default)
     {
         try
         {
             // Validate input
-            var validationResult = ValidateGenerateRequest(csvFile, outputFormat, template);
+            var validationResult = ValidateGenerateRequest(
+                request.CsvFile,
+                request.OutputFormat,
+                request.Template);
             if (validationResult != null) return validationResult;
 
             _logger.LogInformation("Processing sprint report generation for file: {FileName} ({Size} bytes), Format: {Format}, Template: {Template}", 
-                csvFile.FileName, csvFile.Length, outputFormat, template);
+                request.CsvFile.FileName, request.CsvFile.Length, request.OutputFormat, request.Template);
 
             // Parse CSV data
             List<SprintTask> tasks;
-            using (var stream = csvFile.OpenReadStream())
+            using (var stream = request.CsvFile.OpenReadStream())
             {
                 tasks = await _csvService.ParseAsync(stream);
             }
@@ -87,7 +89,7 @@ public class SprintReportController : ControllerBase
             }
 
             // Generate metrics and insights
-            var metrics = _csvService.ComputeMetrics(tasks, sprintName);
+            var metrics = _csvService.ComputeMetrics(tasks, request.SprintName);
             var aiResponse = await _insightService.GenerateEnhancedInsightsAsync(metrics, cancellationToken);
             var insights = aiResponse.Insights;
 
@@ -96,12 +98,12 @@ public class SprintReportController : ControllerBase
             string contentType;
             string fileExtension;
 
-            if (outputFormat.ToLower() == "powerpoint")
+            if (request.OutputFormat.Equals("powerpoint", StringComparison.OrdinalIgnoreCase))
             {
                 var presentationOptions = new PresentationOptions
                 {
-                    Template = template,
-                    CompanyName = companyName ?? string.Empty,
+                    Template = request.Template,
+                    CompanyName = request.CompanyName ?? string.Empty,
                     OutputFormat = PresentationFormat.PowerPoint,
                     IncludeCharts = true,
                     IncludeDetailedMetrics = true,
@@ -125,7 +127,7 @@ public class SprintReportController : ControllerBase
             // Log success with AI metadata
             _logger.LogInformation("Successfully generated {Format} sprint report for {TaskCount} tasks. " +
                                  "AI Cost: ${Cost:F4}, Tokens: {Tokens}, From Cache: {FromCache}, Optimizations: {OptCount}",
-                outputFormat, tasks.Count, aiResponse.TokenUsage.EstimatedCost, aiResponse.TokenUsage.TotalTokens, 
+                request.OutputFormat, tasks.Count, aiResponse.TokenUsage.EstimatedCost, aiResponse.TokenUsage.TotalTokens,
                 aiResponse.FromCache, aiResponse.OptimizationSuggestions.Count);
 
             return File(presentationBytes, contentType, fileName);
@@ -148,35 +150,34 @@ public class SprintReportController : ControllerBase
     /// <summary>
     /// Preview sprint data and get AI-powered insights without generating full presentation
     /// </summary>
-    /// <param name="csvFile">CSV file containing sprint data</param>
-    /// <param name="sprintName">Optional custom sprint name</param>
-    /// <param name="includeOptimization">Include cost optimization analysis</param>
+    /// <param name="request">Multipart form containing the CSV file and preview options</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Preview data with metrics, insights, and optimization recommendations</returns>
     /// <response code="200">Successfully analyzed sprint data</response>
     /// <response code="400">Invalid file or data</response>
     /// <response code="500">Internal server error</response>
     [HttpPost("preview")]
-    [ProducesResponseType(typeof(object), 200)]
-    [ProducesResponseType(typeof(object), 400)]
-    [ProducesResponseType(typeof(object), 500)]
+    [Consumes("multipart/form-data")]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> PreviewSprintData(
-        [Required] IFormFile csvFile,
-        [FromForm] string? sprintName = null,
-        [FromForm] bool includeOptimization = false,
+        [FromForm] PreviewSprintDataRequest request,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            if (csvFile == null || csvFile.Length == 0)
+            var csvValidationResult = ValidateCsvFile(request.CsvFile);
+            if (csvValidationResult != null)
             {
-                return BadRequest(new { error = "Please upload a valid CSV file." });
+                return csvValidationResult;
             }
 
-            _logger.LogInformation("Processing sprint data preview for file: {FileName}", csvFile.FileName);
+            _logger.LogInformation("Processing sprint data preview for file: {FileName}", request.CsvFile.FileName);
 
             List<SprintTask> tasks;
-            using (var stream = csvFile.OpenReadStream())
+            using (var stream = request.CsvFile.OpenReadStream())
             {
                 tasks = await _csvService.ParseAsync(stream);
             }
@@ -187,12 +188,12 @@ public class SprintReportController : ControllerBase
                                        helpUrl = "/api/sprintreport/csv-format" });
             }
 
-            var metrics = _csvService.ComputeMetrics(tasks, sprintName);
+            var metrics = _csvService.ComputeMetrics(tasks, request.SprintName);
             var aiResponse = await _insightService.GenerateEnhancedInsightsAsync(metrics, cancellationToken);
             var insights = aiResponse.Insights;
 
             object? optimizationAnalysis = null;
-            if (includeOptimization)
+            if (request.IncludeOptimization)
             {
                 var optimizedData = _tokenOptimization.OptimizeSprintData(metrics);
                 var costSavings = _tokenOptimization.EstimateSavings(metrics, new List<OptimizationStrategy>
@@ -291,7 +292,7 @@ public class SprintReportController : ControllerBase
 
             _logger.LogInformation("Generated preview for sprint '{SprintName}' with {TaskCount} tasks. " +
                                  "AI Cost: ${Cost:F4}, Optimization: {OptimizationIncluded}",
-                metrics.SprintName, tasks.Count, aiResponse.TokenUsage.EstimatedCost, includeOptimization);
+                metrics.SprintName, tasks.Count, aiResponse.TokenUsage.EstimatedCost, request.IncludeOptimization);
 
             return Ok(preview);
         }
@@ -300,6 +301,22 @@ public class SprintReportController : ControllerBase
             _logger.LogError(ex, "Error previewing sprint data");
             return StatusCode(500, new { error = "An error occurred while processing the data." });
         }
+    }
+
+    /// <summary>
+    /// Download a ready-to-use CSV file for testing the preview and PowerPoint endpoints in Swagger.
+    /// </summary>
+    /// <returns>A sample sprint CSV file</returns>
+    /// <response code="200">Sample CSV downloaded successfully</response>
+    [HttpGet("sample-csv")]
+    [Produces("text/csv")]
+    [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
+    public IActionResult DownloadSampleCsv()
+    {
+        return File(
+            System.Text.Encoding.UTF8.GetBytes(SampleCsvContent),
+            "text/csv",
+            "sample-sprint.csv");
     }
 
     /// <summary>
@@ -346,11 +363,7 @@ public class SprintReportController : ControllerBase
                 "Empty cells are acceptable for optional columns",
                 "Remove any header rows beyond the first column definition row"
             },
-            SampleCsvContent = @"TaskId,Title,Status,Assignee,Type,Priority,StoryPoints,SprintName
-PROJ-123,Implement user login,Done,John Doe,Story,High,5,Sprint 2024-Q1
-PROJ-124,Fix login bug,In Progress,Jane Smith,Bug,Critical,2,Sprint 2024-Q1
-PROJ-125,Update user profile,To Do,Bob Johnson,Story,Medium,3,Sprint 2024-Q1
-PROJ-126,Database migration,Blocked,Alice Brown,Task,High,8,Sprint 2024-Q1",
+            SampleCsvContent = SprintReportController.SampleCsvContent,
             AdvancedFeatures = new
             {
                 AIOptimization = "The system automatically optimizes data processing to minimize AI costs",
@@ -386,7 +399,7 @@ PROJ-126,Database migration,Blocked,Alice Brown,Task,High,8,Sprint 2024-Q1",
         {
             Status = "Healthy",
             Timestamp = DateTime.UtcNow,
-            Version = "1.0.0",
+            Version = "2.0.0",
             Environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production",
             
             Services = new
@@ -838,23 +851,14 @@ PROJ-126,Database migration,Blocked,Alice Brown,Task,High,8,Sprint 2024-Q1",
 
     private IActionResult? ValidateGenerateRequest(IFormFile csvFile, string outputFormat, string template)
     {
-        if (csvFile == null || csvFile.Length == 0)
+        var csvValidationResult = ValidateCsvFile(csvFile);
+        if (csvValidationResult != null)
         {
-            return BadRequest(new { error = "Please upload a valid CSV file.", helpUrl = "/api/sprintreport/csv-format" });
-        }
-
-        if (!csvFile.FileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
-        {
-            return BadRequest(new { error = "File must be a CSV file." });
-        }
-
-        if (csvFile.Length > 10 * 1024 * 1024)
-        {
-            return BadRequest(new { error = "File size must be less than 10MB." });
+            return csvValidationResult;
         }
 
         var validFormats = new[] { "powerpoint", "html" };
-        if (!validFormats.Contains(outputFormat.ToLower()))
+        if (!validFormats.Contains(outputFormat.ToLowerInvariant()))
         {
             return BadRequest(new { 
                 error = "Invalid output format. Supported formats: " + string.Join(", ", validFormats),
@@ -863,13 +867,37 @@ PROJ-126,Database migration,Blocked,Alice Brown,Task,High,8,Sprint 2024-Q1",
         }
 
         var validTemplates = new[] { "professional", "modern", "corporate", "minimal" };
-        if (!validTemplates.Contains(template.ToLower()))
+        if (!validTemplates.Contains(template.ToLowerInvariant()))
         {
             return BadRequest(new { 
                 error = "Invalid template. Available templates: " + string.Join(", ", validTemplates),
                 availableTemplates = validTemplates,
                 templatesUrl = "/api/sprintreport/templates"
             });
+        }
+
+        return null;
+    }
+
+    private IActionResult? ValidateCsvFile(IFormFile csvFile)
+    {
+        if (csvFile == null || csvFile.Length == 0)
+        {
+            return BadRequest(new
+            {
+                error = "Please upload a valid CSV file.",
+                helpUrl = "/api/sprintreport/csv-format"
+            });
+        }
+
+        if (!csvFile.FileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { error = "File must have a .csv extension." });
+        }
+
+        if (csvFile.Length > 10 * 1024 * 1024)
+        {
+            return BadRequest(new { error = "File size must be 10 MB or less." });
         }
 
         return null;
