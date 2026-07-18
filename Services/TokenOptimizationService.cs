@@ -124,7 +124,7 @@ public class TokenOptimizationService : ITokenOptimizationService
                 Category = "Token Reduction",
                 Title = "Implement Data Preprocessing",
                 Description = "High average token usage detected. Implement data preprocessing to reduce input size by 30-50%.",
-                PotentialSavings = (decimal)(totalCost * 0.35),
+                PotentialSavings = totalCost * 0.35m,
                 PriorityLevel = 1,
                 ImplementationSteps = new List<string>
                 {
@@ -141,7 +141,7 @@ public class TokenOptimizationService : ITokenOptimizationService
         // Low cache hit rate recommendation
         if (cacheHitRate < 0.3)
         {
-            var potentialSavings = (decimal)(totalCost * (0.6 - cacheHitRate));
+            var potentialSavings = totalCost * (decimal)(0.6 - cacheHitRate);
             recommendations.Add(new OptimizationRecommendation
             {
                 Category = "Caching",
@@ -169,7 +169,7 @@ public class TokenOptimizationService : ITokenOptimizationService
                 Category = "Model Optimization",
                 Title = "Consider Model Downgrade",
                 Description = "High weekly costs detected. Consider using a less expensive model for routine analysis.",
-                PotentialSavings = (decimal)(totalCost * 0.70), // GPT-3.5 can be ~70% cheaper
+                PotentialSavings = totalCost * 0.70m, // GPT-3.5 can be ~70% cheaper
                 PriorityLevel = 3,
                 ImplementationSteps = new List<string>
                 {
@@ -192,7 +192,7 @@ public class TokenOptimizationService : ITokenOptimizationService
                 Category = "Batch Processing",
                 Title = "Implement Request Batching",
                 Description = "High request frequency detected. Batching similar requests can reduce overhead.",
-                PotentialSavings = (decimal)(totalCost * 0.20),
+                PotentialSavings = totalCost * 0.20m,
                 PriorityLevel = 4,
                 ImplementationSteps = new List<string>
                 {
@@ -427,7 +427,7 @@ public class TokenOptimizationService : ITokenOptimizationService
         {
             "done" or "completed" or "closed" => "done",
             "in progress" or "progress" or "active" => "prog",
-            "blocked" or "blocked" => "block",
+            "blocked" => "block",
             "todo" or "to do" or "new" => "todo",
             "review" or "reviewing" => "rev",
             _ => status.Length > 4 ? status.Substring(0, 4) : status
@@ -453,7 +453,7 @@ public class TokenOptimizationService : ITokenOptimizationService
         return string.Join(" ", words);
     }
 
-    private static string GetMemberStatus(AssigneeWorkload assignee)
+    private static string GetMemberStatus(AssigneeLoad assignee)
     {
         var completionRate = assignee.TotalTasks > 0 ? assignee.CompletedTasks / (double)assignee.TotalTasks : 0;
         

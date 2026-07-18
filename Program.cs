@@ -1,219 +1,134 @@
-using Microsoft.OpenApi.Models;
+using WorkingSprintAgent.Middleware;
 using WorkingSprintAgent.Models;
 using WorkingSprintAgent.Services;
-using WorkingSprintAgent.Swagger;
-using WorkingSprintAgent.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure OpenAI settings
 builder.Services.Configure<OpenAIConfiguration>(
     builder.Configuration.GetSection(OpenAIConfiguration.ConfigSection));
 
-// Add services
 builder.Services.AddControllers();
-builder.Services.AddMemoryCache(); // For OpenAI response caching
-builder.Services.AddHttpClient(); // For OpenAI HTTP client
+builder.Services.AddMemoryCache();
+builder.Services.AddHttpClient();
 
-// Configure Swagger/OpenAPI with comprehensive documentation
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(options =>
-{
-    options.SwaggerDoc("v1", new OpenApiInfo
-    {
-        Version = "v1",
-        Title = "Working Sprint Agent API",
-        Description = "AI-powered sprint data analysis and PowerPoint presentation generation API. " +
-                     "Upload CSV sprint data to get automated insights and stakeholder-ready presentations.",
-        Contact = new OpenApiContact
-        {
-            Name = "Sprint Agent Support",
-            Email = "support@sprintagent.com"
-        },
-        License = new OpenApiLicense
-        {
-            Name = "MIT License",
-            Url = new Uri("https://opensource.org/licenses/MIT")
-        }
-    });
-
-    // Add comprehensive API documentation
-    options.IncludeXmlComments(Path.Combine(AppContext.BaseDirectory, "WorkingSprintAgent.xml"), true);
-    
-    // Configure file upload support in Swagger UI
-    options.OperationFilter<FileUploadOperationFilter>();
-    
-    // Add security definitions for future API key authentication
-    options.AddSecurityDefinition("ApiKey", new OpenApiSecurityScheme
-    {
-        Description = "API Key needed to access the endpoints (if required)",
-        In = ParameterLocation.Header,
-        Name = "X-API-Key",
-        Type = SecuritySchemeType.ApiKey
-    });
-
-    // Configure examples and schemas
-    options.SchemaFilter<ExampleSchemaFilter>();
-    options.DocumentFilter<TagDocumentFilter>();
-    
-    // Group endpoints by functionality
-    options.TagActionsBy(api => new[] { api.GroupName ?? "Sprint Reports" });
-    options.DocInclusionPredicate((name, api) => true);
-});
-
-// Register services with proper dependency injection
 builder.Services.AddScoped<ICsvSprintDataService, CsvSprintDataService>();
-builder.Services.AddScoped<PowerPointPresentationService>(); // PowerPoint generation service
+builder.Services.AddScoped<PowerPointPresentationService>();
 builder.Services.AddScoped<IPresentationBuilderService, PresentationBuilderService>();
-
-// Register OpenAI services
 builder.Services.AddScoped<IOpenAIService, OpenAIService>();
-
-// Register cost optimization services
 builder.Services.AddScoped<ITokenOptimizationService, TokenOptimizationService>();
 builder.Services.AddSingleton<ICostMonitoringService, InMemoryCostMonitoringService>();
-
-// Register token usage logging services
 builder.Services.AddScoped<ITokenUsageLogger, TokenUsageLogger>();
-
-// Register insight generation service (AI-powered with fallback)
 builder.Services.AddScoped<IInsightGenerationService, OpenAIInsightGenerationService>();
 
-// Configure CORS
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
-    {
-        policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader();
-    });
+        policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
 });
 
-// Configure comprehensive logging
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Logging.AddDebug();
-
-if (builder.Environment.IsDevelopment())
-{
-    builder.Logging.SetMinimumLevel(LogLevel.Debug);
-    // Add detailed logging for AI services in development
-    builder.Logging.AddFilter("WorkingSprintAgent.Services.OpenAIService", LogLevel.Information);
-    builder.Logging.AddFilter("WorkingSprintAgent.Services.TokenUsageLogger", LogLevel.Information);
-    builder.Logging.AddFilter("WorkingSprintAgent.Middleware.TokenUsageLoggingMiddleware", LogLevel.Information);
-}
-else
-{
-    builder.Logging.SetMinimumLevel(LogLevel.Information);
-    // Reduce noise in production but keep important AI metrics
-    builder.Logging.AddFilter("WorkingSprintAgent.Services", LogLevel.Information);
-}
+builder.Logging.SetMinimumLevel(
+    builder.Environment.IsDevelopment() ? LogLevel.Debug : LogLevel.Information);
 
 var app = builder.Build();
 
-// Configure pipeline
 if (app.Environment.IsDevelopment())
 {
     app.UseDeveloperExceptionPage();
-    
-    // Enable Swagger in development
-    app.UseSwagger(c =>
-    {
-        c.RouteTemplate = "api/docs/{documentname}/swagger.json";
-    });
-    app.UseSwaggerUI(c =>
-    {
-        c.SwaggerEndpoint("/api/docs/v1/swagger.json", "Working Sprint Agent API v1");
-        c.RoutePrefix = "api/docs";
-        c.DocumentTitle = "Working Sprint Agent API Documentation";
-        c.DefaultModelsExpandDepth(2);
-        c.DefaultModelRendering(Swashbuckle.AspNetCore.SwaggerUI.ModelRendering.Example);
-        c.DisplayRequestDuration();
-        c.EnableTryItOutByDefault();
-        c.EnableDeepLinking();
-        c.EnableFilter();
-        c.ShowExtensions();
-    });
+}
+else
+{
+    app.UseHttpsRedirection();
 }
 
-// Also enable Swagger in production for API documentation
-app.UseSwagger(c =>
-{
-    c.RouteTemplate = "api/docs/{documentname}/swagger.json";
-});
-app.UseSwaggerUI(c =>
-{
-    c.SwaggerEndpoint("/api/docs/v1/swagger.json", "Working Sprint Agent API v1");
-    c.RoutePrefix = "api/docs";
-    c.DocumentTitle = "Working Sprint Agent API Documentation";
-});
-
-app.UseHttpsRedirection();
-app.UseStaticFiles(); // Enable static file serving
-
-// Add token usage logging middleware before other middleware
+app.UseStaticFiles();
 app.UseTokenUsageLogging();
-
 app.UseCors("AllowAll");
 app.UseAuthorization();
 app.MapControllers();
 
-// Enhanced root endpoint with service status and redirect to Swagger
-app.MapGet("/", async (HttpContext context, IInsightGenerationService insightService) => 
+app.MapGet("/api/docs", () => Results.Content(
+    """
+    <!doctype html>
+    <html lang="en">
+    <head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Working Sprint Agent API</title></head>
+    <body style="font-family:Segoe UI,Arial,sans-serif;max-width:900px;margin:40px auto;padding:0 20px">
+      <h1>Working Sprint Agent API</h1>
+      <p><a href="/api/docs/v1/swagger.json">OpenAPI 3.0 document</a></p>
+      <h2>Report endpoints</h2>
+      <ul>
+        <li><code>POST /api/sprintreport/generate</code> — generate an HTML or PowerPoint report from multipart CSV data</li>
+        <li><code>POST /api/sprintreport/preview</code> — preview sprint metrics and insights</li>
+        <li><code>GET /api/sprintreport/csv-format</code> — CSV column requirements and examples</li>
+        <li><code>GET /api/sprintreport/health</code> — service health and configuration status</li>
+        <li><code>GET /api/sprintreport/ai-status</code> — AI and fallback status</li>
+        <li><code>GET /api/sprintreport/templates</code> — presentation templates</li>
+      </ul>
+      <p><a href="/index.html">Return to the application</a></p>
+    </body>
+    </html>
+    """,
+    "text/html"));
+
+app.MapGet("/api/docs/v1/swagger.json", () => Results.Json(new
 {
-    // Check if request prefers JSON (API client) or HTML (browser)
-    var acceptHeader = context.Request.Headers.Accept.ToString();
-    var isApiRequest = acceptHeader.Contains("application/json") && !acceptHeader.Contains("text/html");
-    
-    if (isApiRequest)
+    openapi = "3.0.1",
+    info = new
     {
-        var serviceStatus = insightService.GetServiceStatus();
-        
-        return Results.Ok(new
+        title = "Working Sprint Agent API",
+        version = "v1",
+        description = "Analyze sprint CSV data and generate HTML or PowerPoint reports."
+    },
+    paths = new Dictionary<string, object>
+    {
+        ["/api/sprintreport/generate"] = new { post = new { summary = "Generate a sprint presentation", responses = new Dictionary<string, object> { ["200"] = new { description = "Presentation file" }, ["400"] = new { description = "Invalid input" } } } },
+        ["/api/sprintreport/preview"] = new { post = new { summary = "Preview sprint metrics and insights", responses = new Dictionary<string, object> { ["200"] = new { description = "Sprint preview" }, ["400"] = new { description = "Invalid input" } } } },
+        ["/api/sprintreport/csv-format"] = new { get = new { summary = "Get CSV format requirements", responses = new Dictionary<string, object> { ["200"] = new { description = "CSV format guide" } } } },
+        ["/api/sprintreport/health"] = new { get = new { summary = "Get service health", responses = new Dictionary<string, object> { ["200"] = new { description = "Health status" } } } },
+        ["/api/sprintreport/ai-status"] = new { get = new { summary = "Get AI service status", responses = new Dictionary<string, object> { ["200"] = new { description = "AI status" } } } },
+        ["/api/sprintreport/token-usage"] = new { get = new { summary = "Get token usage", responses = new Dictionary<string, object> { ["200"] = new { description = "Token usage summary" } } } },
+        ["/api/sprintreport/cost-dashboard"] = new { get = new { summary = "Get cost dashboard", responses = new Dictionary<string, object> { ["200"] = new { description = "Cost dashboard" } } } },
+        ["/api/sprintreport/usage-analytics"] = new { get = new { summary = "Get usage analytics", responses = new Dictionary<string, object> { ["200"] = new { description = "Usage analytics" } } } },
+        ["/api/sprintreport/templates"] = new { get = new { summary = "Get presentation templates", responses = new Dictionary<string, object> { ["200"] = new { description = "Template list" } } } }
+    }
+}));
+
+app.MapGet("/", (HttpContext context, IInsightGenerationService insightService) =>
+{
+    var acceptsJson = context.Request.Headers.Accept.Any(value =>
+        value?.Contains("application/json", StringComparison.OrdinalIgnoreCase) == true);
+
+    if (!acceptsJson)
+    {
+        return Results.Redirect("/index.html");
+    }
+
+    var serviceStatus = insightService.GetServiceStatus();
+    return Results.Ok(new
+    {
+        Service = "Working Sprint Agent API",
+        Version = "1.0.0",
+        Status = "Running",
+        serviceStatus.IsAIEnabled,
+        serviceStatus.ServiceType,
+        serviceStatus.Model,
+        Endpoints = new[]
         {
-            Service = "Working Sprint Agent API",
-            Version = "1.0.0",
-            Status = "Running",
-            AIEnabled = serviceStatus.IsAIEnabled,
-            ServiceType = serviceStatus.ServiceType,
-            Model = serviceStatus.Model,
-            Documentation = new
-            {
-                SwaggerUI = "/api/docs",
-                OpenAPISpec = "/api/docs/v1/swagger.json"
-            },
-            Endpoints = new[]
-            {
-                "POST /api/sprintreport/generate - Generate sprint presentation (PowerPoint/HTML)",
-                "POST /api/sprintreport/preview - Preview sprint data with AI insights", 
-                "GET /api/sprintreport/csv-format - CSV format requirements and examples",
-                "GET /api/sprintreport/health - Comprehensive system health check",
-                "GET /api/sprintreport/ai-status - AI service status and configuration",
-                "GET /api/sprintreport/token-usage - Token usage statistics and cost analysis",
-                "GET /api/sprintreport/cost-dashboard - Real-time cost monitoring dashboard",
-                "GET /api/sprintreport/optimization-recommendations - Cost optimization suggestions",
-                "GET /api/sprintreport/templates - Available presentation templates",
-                "GET /api/sprintreport/export-cost-report - Export detailed cost analysis"
-            },
-            Configuration = new
-            {
-                AIEnabled = serviceStatus.IsAIEnabled,
-                CachingEnabled = serviceStatus.IsCachingEnabled,
-                TokenTrackingEnabled = serviceStatus.IsTokenTrackingEnabled,
-                EstimatedCostPerRequest = $"${serviceStatus.EstimatedCostPerRequest:F4}"
-            }
-        });
-    }
-    else
-    {
-        // Redirect browsers to Swagger UI for better user experience
-        context.Response.Redirect("/api/docs");
-        return Results.Empty;
-    }
-})
-.WithName("GetApiInfo")
-.WithTags("System")
-.WithSummary("Get API information and status")
-.WithDescription("Returns API information, service status, and available endpoints. Browsers are redirected to Swagger documentation.")
-.WithOpenApi();
+            "POST /api/sprintreport/generate",
+            "POST /api/sprintreport/preview",
+            "GET /api/sprintreport/csv-format",
+            "GET /api/sprintreport/health",
+            "GET /api/sprintreport/ai-status",
+            "GET /api/sprintreport/token-usage",
+            "GET /api/sprintreport/cost-dashboard",
+            "GET /api/sprintreport/optimization-recommendations",
+            "GET /api/sprintreport/templates",
+            "GET /api/sprintreport/export-cost-report",
+            "GET /api/sprintreport/usage-analytics"
+        }
+    });
+});
 
 app.Run();

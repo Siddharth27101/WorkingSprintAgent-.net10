@@ -239,4 +239,6 @@ public class MockInsightGenerationService : IInsightGenerationService
 
         return "Continue current practices while identifying opportunities for process optimization.";
     }
+
+    #endregion
 }

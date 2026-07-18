@@ -1,7 +1,8 @@
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using OpenAI;
-using OpenAI.Chat;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -14,7 +15,7 @@ namespace WorkingSprintAgent.Services;
 /// </summary>
 public class OpenAIService : IOpenAIService
 {
-    private readonly OpenAIClient _openAIClient;
+    private readonly HttpClient? _openAIClient;
     private readonly OpenAIConfiguration _config;
     private readonly IMemoryCache _cache;
     private readonly ILogger<OpenAIService> _logger;
@@ -26,6 +27,7 @@ public class OpenAIService : IOpenAIService
 
     public OpenAIService(
         IOptions<OpenAIConfiguration> config,
+        IHttpClientFactory httpClientFactory,
         IMemoryCache cache,
         ILogger<OpenAIService> logger,
         ICostMonitoringService costMonitoring,
@@ -40,8 +42,15 @@ public class OpenAIService : IOpenAIService
         _tokenUsageLogger = tokenUsageLogger;
         _tokenUsageHistory = new List<TokenUsageStats>();
 
-        // Initialize OpenAI client with configuration
-        _openAIClient = new OpenAIClient(_config.ApiKey);
+        // The application works in fallback mode when no API key is configured.
+        if (!string.IsNullOrWhiteSpace(_config.ApiKey))
+        {
+            _openAIClient = httpClientFactory.CreateClient(nameof(OpenAIService));
+            _openAIClient.BaseAddress = new Uri("https://api.openai.com/v1/");
+            _openAIClient.Timeout = TimeSpan.FromSeconds(Math.Max(1, _config.TimeoutSeconds));
+            _openAIClient.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", _config.ApiKey);
+        }
     }
 
     public async Task<AIInsightsResponse> GenerateInsightsAsync(SprintMetrics metrics, CancellationToken cancellationToken = default)
@@ -51,6 +60,12 @@ public class OpenAIService : IOpenAIService
 
         try
         {
+            if (_openAIClient is null)
+            {
+                _logger.LogInformation("OpenAI is not configured. Using fallback insights for sprint: {SprintName}", metrics.SprintName);
+                return GenerateFallbackInsights(metrics);
+            }
+
             // Check daily budget before making API call
             if (await IsDailyBudgetExceededAsync())
             {
@@ -82,38 +97,23 @@ public class OpenAIService : IOpenAIService
             _logger.LogInformation("Estimated cost for request: ${Cost:F4} ({Tokens} tokens)", 
                 costEstimate.EstimatedTotalCost, costEstimate.EstimatedTotalTokens);
 
-            // Make OpenAI API call with optimized settings
-            var chatClient = _openAIClient.GetChatClient(_config.Model);
-            
-            var chatCompletion = await chatClient.CompleteChatAsync(
-                messages: new[]
-                {
-                    new SystemChatMessage(GetSystemPrompt()),
-                    new UserChatMessage(optimizedPrompt)
-                },
-                options: new ChatCompletionOptions
-                {
-                    MaxOutputTokenCount = _config.MaxTokens,
-                    Temperature = (float)_config.Temperature,
-                    ResponseFormat = ChatResponseFormat.CreateJsonObjectFormat()
-                },
-                cancellationToken: cancellationToken
-            );
+            // Make the OpenAI REST call without requiring an external SDK package.
+            var chatCompletion = await CompleteChatAsync(optimizedPrompt, cancellationToken);
 
             stopwatch.Stop();
 
             // Parse the AI response
-            var aiResponse = ParseAIResponse(chatCompletion.Value.Content[0].Text);
+            var aiResponse = ParseAIResponse(chatCompletion.Content);
             
             // Track token usage for cost monitoring
             var tokenStats = new TokenUsageStats
             {
                 Timestamp = startTime,
                 RequestType = "InsightGeneration",
-                InputTokens = chatCompletion.Value.Usage.InputTokenCount,
-                OutputTokens = chatCompletion.Value.Usage.OutputTokenCount,
-                TotalTokens = chatCompletion.Value.Usage.TotalTokenCount,
-                EstimatedCost = CalculateActualCost(chatCompletion.Value.Usage.InputTokenCount, chatCompletion.Value.Usage.OutputTokenCount),
+                InputTokens = chatCompletion.InputTokens,
+                OutputTokens = chatCompletion.OutputTokens,
+                TotalTokens = chatCompletion.TotalTokens,
+                EstimatedCost = CalculateActualCost(chatCompletion.InputTokens, chatCompletion.OutputTokens),
                 Model = _config.Model,
                 ResponseTime = stopwatch.Elapsed,
                 CacheHit = false
@@ -357,6 +357,76 @@ Guidelines:
 - Keep each field concise to minimize token usage
 - Use data-driven language, avoid fluff";
     }
+
+    private async Task<ChatCompletionResult> CompleteChatAsync(
+        string prompt,
+        CancellationToken cancellationToken)
+    {
+        if (_openAIClient is null)
+        {
+            throw new InvalidOperationException("OpenAI is not configured.");
+        }
+
+        var request = new
+        {
+            model = _config.Model,
+            messages = new object[]
+            {
+                new { role = "system", content = GetSystemPrompt() },
+                new { role = "user", content = prompt }
+            },
+            max_tokens = _config.MaxTokens,
+            temperature = _config.Temperature,
+            response_format = new { type = "json_object" }
+        };
+
+        using var response = await _openAIClient.PostAsJsonAsync(
+            "chat/completions",
+            request,
+            cancellationToken);
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException(
+                $"OpenAI request failed with status {(int)response.StatusCode}: {responseBody}");
+        }
+
+        using var document = JsonDocument.Parse(responseBody);
+        var root = document.RootElement;
+        var content = root.GetProperty("choices")[0]
+            .GetProperty("message")
+            .GetProperty("content")
+            .GetString() ?? throw new JsonException("OpenAI returned an empty message.");
+
+        var usage = root.TryGetProperty("usage", out var usageElement)
+            ? usageElement
+            : default;
+        var inputTokens = GetInt32(usage, "prompt_tokens");
+        var outputTokens = GetInt32(usage, "completion_tokens");
+        var totalTokens = GetInt32(usage, "total_tokens");
+
+        return new ChatCompletionResult(
+            content,
+            inputTokens,
+            outputTokens,
+            totalTokens > 0 ? totalTokens : inputTokens + outputTokens);
+    }
+
+    private static int GetInt32(JsonElement element, string propertyName)
+    {
+        return element.ValueKind == JsonValueKind.Object
+            && element.TryGetProperty(propertyName, out var property)
+            && property.TryGetInt32(out var value)
+                ? value
+                : 0;
+    }
+
+    private sealed record ChatCompletionResult(
+        string Content,
+        int InputTokens,
+        int OutputTokens,
+        int TotalTokens);
 
     private SprintInsights ParseAIResponse(string jsonResponse)
     {

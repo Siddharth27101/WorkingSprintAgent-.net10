@@ -1,20 +1,17 @@
-using DocumentFormat.OpenXml;
-using DocumentFormat.OpenXml.Drawing;
-using DocumentFormat.OpenXml.Drawing.Charts;
-using DocumentFormat.OpenXml.Packaging;
-using DocumentFormat.OpenXml.Presentation;
-using System.Drawing;
+using System.IO.Compression;
+using System.Security;
+using System.Text;
 using WorkingSprintAgent.Models;
-using A = DocumentFormat.OpenXml.Drawing;
-using P = DocumentFormat.OpenXml.Presentation;
 
 namespace WorkingSprintAgent.Services;
 
 /// <summary>
-/// Professional PowerPoint presentation generation service using OpenXML
+/// Creates a standards-based PowerPoint package using only the .NET runtime.
 /// </summary>
 public class PowerPointPresentationService
 {
+    private const long SlideWidth = 10_058_400;
+    private const long SlideHeight = 7_534_800;
     private readonly ILogger<PowerPointPresentationService> _logger;
 
     public PowerPointPresentationService(ILogger<PowerPointPresentationService> logger)
@@ -22,396 +19,300 @@ public class PowerPointPresentationService
         _logger = logger;
     }
 
-    public byte[] CreatePresentationFromTemplate(SprintMetrics metrics, SprintInsights insights, PresentationOptions options)
+    public byte[] CreatePresentationFromTemplate(
+        SprintMetrics metrics,
+        SprintInsights insights,
+        PresentationOptions options)
     {
-        _logger.LogInformation("Creating PowerPoint presentation for sprint: {SprintName}", metrics.SprintName);
+        ArgumentNullException.ThrowIfNull(metrics);
+        ArgumentNullException.ThrowIfNull(insights);
+        ArgumentNullException.ThrowIfNull(options);
 
+        var slides = CreateSlides(metrics, insights, options);
+        var theme = GetTheme(options.Template);
         using var stream = new MemoryStream();
-        
-        // Create presentation document
-        using (var presentationDocument = PresentationDocument.Create(stream, PresentationDocumentType.Presentation))
+
+        using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
         {
-            CreatePresentationPart(presentationDocument);
-            
-            var presentationPart = presentationDocument.PresentationPart!;
-            var slideIdList = presentationPart.Presentation.SlideIdList!;
+            WriteEntry(archive, "[Content_Types].xml", BuildContentTypes(slides.Count));
+            WriteEntry(archive, "_rels/.rels", PackageRelationships);
+            WriteEntry(archive, "ppt/presentation.xml", BuildPresentation(slides.Count));
+            WriteEntry(archive, "ppt/_rels/presentation.xml.rels", BuildPresentationRelationships(slides.Count));
+            WriteEntry(archive, "ppt/slideMasters/slideMaster1.xml", SlideMaster);
+            WriteEntry(archive, "ppt/slideMasters/_rels/slideMaster1.xml.rels", SlideMasterRelationships);
+            WriteEntry(archive, "ppt/slideLayouts/slideLayout1.xml", SlideLayout);
+            WriteEntry(archive, "ppt/slideLayouts/_rels/slideLayout1.xml.rels", SlideLayoutRelationships);
+            WriteEntry(archive, "ppt/theme/theme1.xml", Theme);
 
-            // Create slides
-            CreateTitleSlide(presentationPart, slideIdList, metrics, options);
-            CreateExecutiveSummarySlide(presentationPart, slideIdList, metrics, insights);
-            CreateMetricsOverviewSlide(presentationPart, slideIdList, metrics);
-            CreateCompletionChartSlide(presentationPart, slideIdList, metrics);
-            CreateTeamPerformanceSlide(presentationPart, slideIdList, metrics, insights);
-            CreateRisksAndBlockersSlide(presentationPart, slideIdList, insights);
-            CreateRecommendationsSlide(presentationPart, slideIdList, insights);
-            CreateNextStepsSlide(presentationPart, slideIdList, insights);
-
-            presentationDocument.Save();
+            for (var index = 0; index < slides.Count; index++)
+            {
+                var slideNumber = index + 1;
+                WriteEntry(archive, $"ppt/slides/slide{slideNumber}.xml", BuildSlide(slides[index], theme));
+                WriteEntry(archive, $"ppt/slides/_rels/slide{slideNumber}.xml.rels", SlideRelationships);
+            }
         }
 
-        var result = stream.ToArray();
-        _logger.LogInformation("PowerPoint presentation created successfully. Size: {Size} KB", result.Length / 1024);
-        
-        return result;
+        var bytes = stream.ToArray();
+        _logger.LogInformation(
+            "Created {SlideCount}-slide PowerPoint presentation for sprint '{SprintName}' ({Size} bytes)",
+            slides.Count,
+            metrics.SprintName,
+            bytes.Length);
+        return bytes;
     }
 
-    #region Slide Creation Methods
-
-    private void CreatePresentationPart(PresentationDocument presentationDocument)
+    private static List<SlideContent> CreateSlides(
+        SprintMetrics metrics,
+        SprintInsights insights,
+        PresentationOptions options)
     {
-        var presentationPart = presentationDocument.AddPresentationPart();
-        presentationPart.Presentation = new P.Presentation();
+        var company = string.IsNullOrWhiteSpace(options.CompanyName)
+            ? string.Empty
+            : $" | {options.CompanyName.Trim()}";
+        var statusLines = metrics.TasksByStatus.Any()
+            ? string.Join('\n', metrics.TasksByStatus
+                .OrderByDescending(item => item.Value)
+                .Select(item => $"{item.Key}: {item.Value}"))
+            : "No status data available";
+        var teamLines = metrics.WorkloadByAssignee.Any()
+            ? string.Join('\n', metrics.WorkloadByAssignee
+                .OrderByDescending(member => member.CompletedTasks)
+                .Take(10)
+                .Select(member => $"{member.Assignee}: {member.CompletedTasks}/{member.TotalTasks} tasks completed"))
+            : "No team allocation data available";
 
-        CreateSlideMasterPart(presentationPart);
-        
-        presentationPart.Presentation.SlideIdList = new P.SlideIdList();
-        presentationPart.Presentation.SlideSize = new P.SlideSize
+        return new List<SlideContent>
         {
-            Cx = 10058400,  // Standard slide width
-            Cy = 7534800    // Standard slide height
+            new(
+                $"{metrics.SprintName} - Sprint Report",
+                $"Generated on {DateTime.Now:MMMM dd, yyyy}{company}\n\n" +
+                $"Completion: {metrics.CompletionRatePercent:F0}%\n" +
+                $"Tasks: {metrics.CompletedTasks} of {metrics.TotalTasks} completed"),
+            new(
+                "Executive Summary",
+                $"{insights.ExecutiveSummary}\n\nKey highlights:\n{FormatItems(insights.KeyHighlights)}"),
+            new(
+                "Sprint Metrics Overview",
+                $"Total tasks: {metrics.TotalTasks}\n" +
+                $"Completed tasks: {metrics.CompletedTasks}\n" +
+                $"Blocked tasks: {metrics.BlockedTasks}\n" +
+                $"Completion rate: {metrics.CompletionRatePercent:F1}%\n" +
+                $"Story points: {metrics.CompletedStoryPoints:F1} of {metrics.TotalStoryPoints:F1}"),
+            new("Task Status Distribution", statusLines),
+            new("Team Performance", $"{insights.TeamPerformanceNarrative}\n\n{teamLines}"),
+            new("Risks & Blockers", FormatItems(insights.RisksAndBlockers)),
+            new("Recommendations", FormatItems(insights.Recommendations)),
+            new("Next Sprint Focus", insights.NextSprintFocus)
         };
+    }
 
-        presentationPart.Presentation.NotesSize = new P.NotesSize
+    private static string FormatItems(IEnumerable<string> items)
+    {
+        var materialized = items.Where(item => !string.IsNullOrWhiteSpace(item)).ToList();
+        return materialized.Count == 0
+            ? "None identified"
+            : string.Join('\n', materialized.Select(item => $"• {item}"));
+    }
+
+    private static void WriteEntry(ZipArchive archive, string path, string content)
+    {
+        var entry = archive.CreateEntry(path, CompressionLevel.Optimal);
+        using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        writer.Write(content);
+    }
+
+    private static string BuildContentTypes(int slideCount)
+    {
+        var slideOverrides = string.Concat(Enumerable.Range(1, slideCount).Select(index =>
+            $"<Override PartName=\"/ppt/slides/slide{index}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slide+xml\"/>"));
+
+        return $"""
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+              <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+              <Default Extension="xml" ContentType="application/xml"/>
+              <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+              <Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>
+              <Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>
+              <Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>
+              {slideOverrides}
+            </Types>
+            """;
+    }
+
+    private static string BuildPresentation(int slideCount)
+    {
+        var slideIds = string.Concat(Enumerable.Range(1, slideCount).Select(index =>
+            $"<p:sldId id=\"{255 + index}\" r:id=\"rId{index + 1}\"/>"));
+
+        return $"""
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+              <p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>
+              <p:sldIdLst>{slideIds}</p:sldIdLst>
+              <p:sldSz cx="{SlideWidth}" cy="{SlideHeight}" type="screen4x3"/>
+              <p:notesSz cx="{SlideHeight}" cy="{SlideWidth}"/>
+              <p:defaultTextStyle/>
+            </p:presentation>
+            """;
+    }
+
+    private static string BuildPresentationRelationships(int slideCount)
+    {
+        var slideRelationships = string.Concat(Enumerable.Range(1, slideCount).Select(index =>
+            $"<Relationship Id=\"rId{index + 1}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide\" Target=\"slides/slide{index}.xml\"/>"));
+
+        return $"""
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/>
+              {slideRelationships}
+            </Relationships>
+            """;
+    }
+
+    private static string BuildSlide(SlideContent content, PresentationTheme theme)
+    {
+        return $"""
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+              <p:cSld>
+                <p:bg><p:bgPr><a:solidFill><a:srgbClr val="{theme.BackgroundColor}"/></a:solidFill><a:effectLst/></p:bgPr></p:bg>
+                <p:spTree>
+                  {GroupShapeProperties}
+                  {BuildTextShape(2, "Title", content.Title, 685800, 457200, 8686800, 1143000, 3200, true, theme.TitleColor)}
+                  {BuildTextShape(3, "Content", content.Body, 914400, 1828800, 8229600, 4800600, 1800, false, theme.TextColor)}
+                </p:spTree>
+              </p:cSld>
+              <p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>
+            </p:sld>
+            """;
+    }
+
+    private static string BuildTextShape(
+        uint id,
+        string name,
+        string text,
+        long x,
+        long y,
+        long width,
+        long height,
+        int fontSize,
+        bool bold,
+        string fontColor)
+    {
+        var paragraphs = string.Concat(
+            text.Replace("\r", string.Empty, StringComparison.Ordinal)
+                .Split('\n')
+                .Select(line =>
+                    $"<a:p><a:r><a:rPr lang=\"en-US\" sz=\"{fontSize}\" b=\"{(bold ? 1 : 0)}\"><a:solidFill><a:srgbClr val=\"{fontColor}\"/></a:solidFill></a:rPr><a:t>{EscapeXml(line)}</a:t></a:r><a:endParaRPr lang=\"en-US\" sz=\"{fontSize}\"/></a:p>"));
+
+        return $"""
+            <p:sp>
+              <p:nvSpPr><p:cNvPr id="{id}" name="{EscapeXml(name)}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>
+              <p:spPr>
+                <a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{width}" cy="{height}"/></a:xfrm>
+                <a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln>
+              </p:spPr>
+              <p:txBody><a:bodyPr wrap="square"/><a:lstStyle/>{paragraphs}</p:txBody>
+            </p:sp>
+            """;
+    }
+
+    private static PresentationTheme GetTheme(string template)
+    {
+        return template.ToLowerInvariant() switch
         {
-            Cx = 10058400,
-            Cy = 7534800
+            "modern" => new PresentationTheme("F7F3FF", "603C8F", "302842"),
+            "corporate" => new PresentationTheme("F4F7FA", "17365D", "243447"),
+            "minimal" => new PresentationTheme("FFFFFF", "111111", "333333"),
+            _ => new PresentationTheme("FFFFFF", "243447", "243447")
         };
     }
 
-    private void CreateSlideMasterPart(PresentationPart presentationPart)
-    {
-        var slideMasterPart = presentationPart.AddNewPart<SlideMasterPart>();
-        var slideMaster = new P.SlideMaster();
-        slideMaster.Append(new P.CommonSlideData(new P.ShapeTree()));
-        slideMaster.Append(new P.ColorMap());
-        slideMasterPart.SlideMaster = slideMaster;
+    private static string EscapeXml(string value) => SecurityElement.Escape(value) ?? string.Empty;
 
-        var slideLayoutPart = slideMasterPart.AddNewPart<SlideLayoutPart>();
-        var slideLayout = new P.SlideLayout(new P.CommonSlideData(new P.ShapeTree()));
-        slideLayoutPart.SlideLayout = slideLayout;
-    }
+    private sealed record SlideContent(string Title, string Body);
+    private sealed record PresentationTheme(string BackgroundColor, string TitleColor, string TextColor);
 
-    private SlidePart CreateSlide(PresentationPart presentationPart, P.SlideIdList slideIdList)
-    {
-        var slidePart = presentationPart.AddNewPart<SlidePart>();
-        var slide = new P.Slide(new P.CommonSlideData(new P.ShapeTree()));
-        slidePart.Slide = slide;
+    private const string PackageRelationships = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+        </Relationships>
+        """;
 
-        var slideId = new P.SlideId
-        {
-            Id = (uint)(slideIdList.ChildElements.Count + 256),
-            RelationshipId = presentationPart.GetIdOfPart(slidePart)
-        };
-        slideIdList.Append(slideId);
+    private const string SlideRelationships = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
+        </Relationships>
+        """;
 
-        return slidePart;
-    }
+    private const string SlideMasterRelationships = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
+          <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="../theme/theme1.xml"/>
+        </Relationships>
+        """;
 
-    private void CreateTitleSlide(PresentationPart presentationPart, P.SlideIdList slideIdList, SprintMetrics metrics, PresentationOptions options)
-    {
-        var slidePart = CreateSlide(presentationPart, slideIdList);
-        var shapeTree = slidePart.Slide.CommonSlideData!.ShapeTree!;
+    private const string SlideLayoutRelationships = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/>
+        </Relationships>
+        """;
 
-        // Title shape
-        var titleShape = CreateTextBox(
-            shapeId: 2,
-            x: 1016000, y: 2032000,
-            width: 8128000, height: 1143000,
-            text: $"{metrics.SprintName} - Sprint Report",
-            fontSize: 4400,
-            isBold: true
-        );
-        shapeTree.Append(titleShape);
+    private const string GroupShapeProperties = """
+        <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
+        <p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>
+        """;
 
-        // Subtitle shape
-        var subtitleShape = CreateTextBox(
-            shapeId: 3,
-            x: 1016000, y: 3175200,
-            width: 8128000, height: 1143000,
-            text: $"Generated on {DateTime.Now:MMMM dd, yyyy} | {options.CompanyName}",
-            fontSize: 2000,
-            isBold: false
-        );
-        shapeTree.Append(subtitleShape);
+    private const string SlideMaster = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <p:sldMaster xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+          <p:cSld name="Default"><p:spTree>
+            <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
+            <p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>
+          </p:spTree></p:cSld>
+          <p:clrMap accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" bg1="lt1" bg2="lt2" folHlink="folHlink" hlink="hlink" tx1="dk1" tx2="dk2"/>
+          <p:sldLayoutIdLst><p:sldLayoutId id="1" r:id="rId1"/></p:sldLayoutIdLst>
+          <p:txStyles><p:titleStyle/><p:bodyStyle/><p:otherStyle/></p:txStyles>
+        </p:sldMaster>
+        """;
 
-        // Key metrics preview
-        var metricsPreview = CreateTextBox(
-            shapeId: 4,
-            x: 1016000, y: 4572000,
-            width: 8128000, height: 1905000,
-            text: $"Sprint Completion: {metrics.CompletionRatePercent:F0}%\n" +
-                  $"Tasks Completed: {metrics.CompletedTasks} of {metrics.TotalTasks}\n" +
-                  (metrics.TotalStoryPoints > 0 ? $"Story Points: {metrics.CompletedStoryPoints:F0} of {metrics.TotalStoryPoints:F0}" : ""),
-            fontSize: 1800,
-            isBold: false
-        );
-        shapeTree.Append(metricsPreview);
-    }
+    private const string SlideLayout = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <p:sldLayout xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" type="blank" preserve="1">
+          <p:cSld name="Blank"><p:spTree>
+            <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
+            <p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>
+          </p:spTree></p:cSld>
+          <p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>
+        </p:sldLayout>
+        """;
 
-    private void CreateExecutiveSummarySlide(PresentationPart presentationPart, P.SlideIdList slideIdList, SprintMetrics metrics, SprintInsights insights)
-    {
-        var slidePart = CreateSlide(presentationPart, slideIdList);
-        var shapeTree = slidePart.Slide.CommonSlideData!.ShapeTree!;
-
-        // Title
-        var titleShape = CreateTextBox(2, 686400, 457200, 8636800, 1371600,
-            "Executive Summary", 3200, true);
-        shapeTree.Append(titleShape);
-
-        // Main summary
-        var summaryShape = CreateTextBox(3, 686400, 1828800, 8636800, 2286000,
-            insights.ExecutiveSummary, 2400, false);
-        shapeTree.Append(summaryShape);
-
-        // Key highlights section
-        var highlightsTitle = CreateTextBox(4, 686400, 4114800, 8636800, 685800,
-            "Key Highlights:", 2000, true);
-        shapeTree.Append(highlightsTitle);
-
-        var highlights = string.Join("\n• ", new[] { "" }.Concat(insights.KeyHighlights.Take(4)));
-        var highlightsShape = CreateTextBox(5, 1371600, 4800600, 7962000, 2286000,
-            highlights, 1800, false);
-        shapeTree.Append(highlightsShape);
-    }
-
-    private void CreateMetricsOverviewSlide(PresentationPart presentationPart, P.SlideIdList slideIdList, SprintMetrics metrics)
-    {
-        var slidePart = CreateSlide(presentationPart, slideIdList);
-        var shapeTree = slidePart.Slide.CommonSlideData!.ShapeTree!;
-
-        // Title
-        var titleShape = CreateTextBox(2, 686400, 457200, 8636800, 1371600,
-            "Sprint Metrics Overview", 3200, true);
-        shapeTree.Append(titleShape);
-
-        // Metrics cards layout
-        CreateMetricCard(shapeTree, 3, 1016000, 2286000, "Total Tasks", metrics.TotalTasks.ToString());
-        CreateMetricCard(shapeTree, 4, 3048000, 2286000, "Completed", metrics.CompletedTasks.ToString());
-        CreateMetricCard(shapeTree, 5, 5080000, 2286000, "Completion Rate", $"{metrics.CompletionRatePercent:F0}%");
-        CreateMetricCard(shapeTree, 6, 7112000, 2286000, "Blocked", metrics.BlockedTasks.ToString());
-
-        if (metrics.TotalStoryPoints > 0)
-        {
-            CreateMetricCard(shapeTree, 7, 1016000, 4572000, "Story Points", $"{metrics.CompletedStoryPoints:F0}/{metrics.TotalStoryPoints:F0}");
-            CreateMetricCard(shapeTree, 8, 3048000, 4572000, "Points Rate", $"{(metrics.CompletedStoryPoints / metrics.TotalStoryPoints * 100):F0}%");
-        }
-
-        // Team size
-        CreateMetricCard(shapeTree, 9, 5080000, 4572000, "Team Size", metrics.WorkloadByAssignee.Count.ToString());
-    }
-
-    private void CreateCompletionChartSlide(PresentationPart presentationPart, P.SlideIdList slideIdList, SprintMetrics metrics)
-    {
-        var slidePart = CreateSlide(presentationPart, slideIdList);
-        var shapeTree = slidePart.Slide.CommonSlideData!.ShapeTree!;
-
-        // Title
-        var titleShape = CreateTextBox(2, 686400, 457200, 8636800, 1371600,
-            "Task Status Distribution", 3200, true);
-        shapeTree.Append(titleShape);
-
-        // Create a simple chart representation (text-based for simplicity)
-        var chartText = "Task Status Breakdown:\n\n";
-        foreach (var status in metrics.TasksByStatus.OrderByDescending(x => x.Value))
-        {
-            var percentage = (status.Value / (double)metrics.TotalTasks * 100);
-            var bar = new string('█', Math.Max(1, (int)(percentage / 5))); // Visual bar
-            chartText += $"{status.Key}: {status.Value} ({percentage:F0}%)\n{bar}\n\n";
-        }
-
-        var chartShape = CreateTextBox(3, 1371600, 2286000, 7315200, 4572000,
-            chartText, 1600, false);
-        shapeTree.Append(chartShape);
-    }
-
-    private void CreateTeamPerformanceSlide(PresentationPart presentationPart, P.SlideIdList slideIdList, SprintMetrics metrics, SprintInsights insights)
-    {
-        var slidePart = CreateSlide(presentationPart, slideIdList);
-        var shapeTree = slidePart.Slide.CommonSlideData!.ShapeTree!;
-
-        // Title
-        var titleShape = CreateTextBox(2, 686400, 457200, 8636800, 1371600,
-            "Team Performance", 3200, true);
-        shapeTree.Append(titleShape);
-
-        // Team narrative
-        var narrativeShape = CreateTextBox(3, 686400, 1828800, 8636800, 1143000,
-            insights.TeamPerformanceNarrative, 2000, false);
-        shapeTree.Append(narrativeShape);
-
-        // Team breakdown
-        if (metrics.WorkloadByAssignee.Any())
-        {
-            var teamTitle = CreateTextBox(4, 686400, 3200400, 8636800, 685800,
-                "Individual Performance:", 1800, true);
-            shapeTree.Append(teamTitle);
-
-            var teamData = string.Join("\n", metrics.WorkloadByAssignee
-                .OrderByDescending(a => a.CompletedTasks)
-                .Take(8)
-                .Select(a => $"{a.Assignee}: {a.CompletedTasks}/{a.TotalTasks} tasks completed ({(a.CompletedTasks / (double)Math.Max(1, a.TotalTasks) * 100):F0}%)"));
-
-            var teamShape = CreateTextBox(5, 1371600, 4000200, 7962000, 3086000,
-                teamData, 1600, false);
-            shapeTree.Append(teamShape);
-        }
-    }
-
-    private void CreateRisksAndBlockersSlide(PresentationPart presentationPart, P.SlideIdList slideIdList, SprintInsights insights)
-    {
-        var slidePart = CreateSlide(presentationPart, slideIdList);
-        var shapeTree = slidePart.Slide.CommonSlideData!.ShapeTree!;
-
-        // Title
-        var titleShape = CreateTextBox(2, 686400, 457200, 8636800, 1371600,
-            "Risks & Blockers", 3200, true);
-        shapeTree.Append(titleShape);
-
-        // Risks content
-        var risksText = "⚠️ Key Risks and Blockers:\n\n";
-        risksText += string.Join("\n\n• ", new[] { "" }.Concat(insights.RisksAndBlockers));
-
-        var risksShape = CreateTextBox(3, 1016000, 2286000, 8128000, 4572000,
-            risksText, 2000, false);
-        shapeTree.Append(risksShape);
-    }
-
-    private void CreateRecommendationsSlide(PresentationPart presentationPart, P.SlideIdList slideIdList, SprintInsights insights)
-    {
-        var slidePart = CreateSlide(presentationPart, slideIdList);
-        var shapeTree = slidePart.Slide.CommonSlideData!.ShapeTree!;
-
-        // Title
-        var titleShape = CreateTextBox(2, 686400, 457200, 8636800, 1371600,
-            "Recommendations", 3200, true);
-        shapeTree.Append(titleShape);
-
-        // Recommendations content
-        var recommendationsText = "💡 Action Items & Recommendations:\n\n";
-        recommendationsText += string.Join("\n\n• ", new[] { "" }.Concat(insights.Recommendations));
-
-        var recommendationsShape = CreateTextBox(3, 1016000, 2286000, 8128000, 4572000,
-            recommendationsText, 2000, false);
-        shapeTree.Append(recommendationsShape);
-    }
-
-    private void CreateNextStepsSlide(PresentationPart presentationPart, P.SlideIdList slideIdList, SprintInsights insights)
-    {
-        var slidePart = CreateSlide(presentationPart, slideIdList);
-        var shapeTree = slidePart.Slide.CommonSlideData!.ShapeTree!;
-
-        // Title
-        var titleShape = CreateTextBox(2, 686400, 457200, 8636800, 1371600,
-            "Next Sprint Focus", 3200, true);
-        shapeTree.Append(titleShape);
-
-        // Next sprint focus
-        var focusShape = CreateTextBox(3, 1016000, 2286000, 8128000, 2286000,
-            $"🎯 {insights.NextSprintFocus}", 2400, false);
-        shapeTree.Append(focusShape);
-
-        // Thank you section
-        var thanksShape = CreateTextBox(4, 1016000, 5486400, 8128000, 1371600,
-            "Thank you for your attention!\nQuestions & Discussion", 2000, true);
-        shapeTree.Append(thanksShape);
-    }
-
-    #endregion
-
-    #region Helper Methods
-
-    private P.Shape CreateTextBox(uint shapeId, long x, long y, long width, long height, string text, int fontSize, bool isBold)
-    {
-        var shape = new P.Shape();
-
-        var nvSpPr = new P.NonVisualShapeProperties();
-        nvSpPr.Append(new P.NonVisualDrawingProperties { Id = shapeId, Name = $"TextBox {shapeId}" });
-        nvSpPr.Append(new P.NonVisualShapeDrawingProperties());
-        nvSpPr.Append(new P.ApplicationNonVisualDrawingProperties());
-
-        var spPr = new P.ShapeProperties();
-        spPr.Append(new A.Transform2D
-        {
-            Offset = new A.Offset { X = x, Y = y },
-            Extents = new A.Extents { Cx = width, Cy = height }
-        });
-        spPr.Append(new A.PresetGeometry(new A.AdjustValueList()) { Preset = A.ShapeTypeValues.Rectangle });
-
-        var txBody = new P.TextBody();
-        txBody.Append(new A.BodyProperties());
-        txBody.Append(new A.ListStyle());
-
-        var paragraph = new A.Paragraph();
-        if (isBold)
-        {
-            var run = new A.Run();
-            run.Append(new A.RunProperties { FontSize = fontSize, Bold = true });
-            run.Append(new A.Text(text));
-            paragraph.Append(run);
-        }
-        else
-        {
-            var run = new A.Run();
-            run.Append(new A.RunProperties { FontSize = fontSize });
-            run.Append(new A.Text(text));
-            paragraph.Append(run);
-        }
-
-        txBody.Append(paragraph);
-
-        shape.Append(nvSpPr);
-        shape.Append(spPr);
-        shape.Append(txBody);
-
-        return shape;
-    }
-
-    private void CreateMetricCard(P.ShapeTree shapeTree, uint shapeId, long x, long y, string label, string value)
-    {
-        // Card background
-        var cardShape = new P.Shape();
-        var nvSpPr = new P.NonVisualShapeProperties();
-        nvSpPr.Append(new P.NonVisualDrawingProperties { Id = shapeId, Name = $"Card {shapeId}" });
-        nvSpPr.Append(new P.NonVisualShapeDrawingProperties());
-        nvSpPr.Append(new P.ApplicationNonVisualDrawingProperties());
-
-        var spPr = new P.ShapeProperties();
-        spPr.Append(new A.Transform2D
-        {
-            Offset = new A.Offset { X = x, Y = y },
-            Extents = new A.Extents { Cx = 1524000, Cy = 1905000 }
-        });
-        spPr.Append(new A.PresetGeometry(new A.AdjustValueList()) { Preset = A.ShapeTypeValues.Rectangle });
-        spPr.Append(new A.SolidFill(new A.RgbColorModelHex { Val = "F8F9FA" }));
-
-        var txBody = new P.TextBody();
-        txBody.Append(new A.BodyProperties { Anchor = A.TextAnchoringTypeValues.Center });
-        txBody.Append(new A.ListStyle());
-
-        // Value paragraph
-        var valueParagraph = new A.Paragraph();
-        valueParagraph.Append(new A.ParagraphProperties { Alignment = A.TextAlignmentTypeValues.Center });
-        var valueRun = new A.Run();
-        valueRun.Append(new A.RunProperties { FontSize = 3600, Bold = true });
-        valueRun.Append(new A.Text(value));
-        valueParagraph.Append(valueRun);
-        txBody.Append(valueParagraph);
-
-        // Label paragraph
-        var labelParagraph = new A.Paragraph();
-        labelParagraph.Append(new A.ParagraphProperties { Alignment = A.TextAlignmentTypeValues.Center });
-        var labelRun = new A.Run();
-        labelRun.Append(new A.RunProperties { FontSize = 1400 });
-        labelRun.Append(new A.Text(label));
-        labelParagraph.Append(labelRun);
-        txBody.Append(labelParagraph);
-
-        cardShape.Append(nvSpPr);
-        cardShape.Append(spPr);
-        cardShape.Append(txBody);
-
-        shapeTree.Append(cardShape);
-    }
-
-    #endregion
+    private const string Theme = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Sprint Report Theme">
+          <a:themeElements>
+            <a:clrScheme name="Sprint Report">
+              <a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1>
+              <a:dk2><a:srgbClr val="243447"/></a:dk2><a:lt2><a:srgbClr val="E9EEF5"/></a:lt2>
+              <a:accent1><a:srgbClr val="3279B7"/></a:accent1><a:accent2><a:srgbClr val="603C8F"/></a:accent2>
+              <a:accent3><a:srgbClr val="27864B"/></a:accent3><a:accent4><a:srgbClr val="D49B00"/></a:accent4>
+              <a:accent5><a:srgbClr val="C73535"/></a:accent5><a:accent6><a:srgbClr val="5A6573"/></a:accent6>
+              <a:hlink><a:srgbClr val="0563C1"/></a:hlink><a:folHlink><a:srgbClr val="954F72"/></a:folHlink>
+            </a:clrScheme>
+            <a:fontScheme name="Sprint Report"><a:majorFont><a:latin typeface="Aptos Display"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Aptos"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme>
+            <a:fmtScheme name="Sprint Report">
+              <a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="accent1"/></a:solidFill><a:solidFill><a:schemeClr val="accent2"/></a:solidFill></a:fillStyleLst>
+              <a:lnStyleLst><a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="25400"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="38100"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln></a:lnStyleLst>
+              <a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst>
+              <a:bgFillStyleLst><a:solidFill><a:schemeClr val="lt1"/></a:solidFill><a:solidFill><a:schemeClr val="lt2"/></a:solidFill><a:solidFill><a:schemeClr val="dk1"/></a:solidFill></a:bgFillStyleLst>
+            </a:fmtScheme>
+          </a:themeElements>
+        </a:theme>
+        """;
 }

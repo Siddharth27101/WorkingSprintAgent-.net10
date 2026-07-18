@@ -1,86 +1,73 @@
 # Working Sprint Agent
 
-A .NET 8 Web API that automatically retrieves sprint data, generates AI-powered insights, and creates stakeholder-ready presentations with 60-99% token cost optimization.
+A .NET 8 ASP.NET Core API that reads sprint data from CSV, generates rule-based or OpenAI-assisted insights, and creates HTML or PowerPoint presentations.
 
-## ✅ Key Features
+## Requirements
 
-- **ZERO Compilation Errors** - Guaranteed to build successfully
-- **60-99% Token Cost Optimization** - Pre-computed metrics, smart prompt engineering
-- **No External Dependencies** - Works completely offline
-- **Professional HTML Presentations** - Beautiful, stakeholder-ready reports
-- **Flexible CSV Parsing** - Handles various column formats automatically
-- **RESTful API** - Clean endpoints for integration
-- **Production Ready** - Proper error handling, logging, validation
+- Visual Studio 2022 17.8 or later with the **ASP.NET and web development** workload, or the .NET 8 SDK
+- An OpenAI API key is optional; the application uses local rule-based insights when no key is configured
 
-## 🚀 Quick Start
+The project uses only the ASP.NET Core shared framework, so it does not require third-party NuGet packages.
+
+## Run in Visual Studio
+
+1. Open `WorkingSprintAgent.csproj` in Visual Studio.
+2. Select either `WorkingSprintAgent (HTTP)` or `WorkingSprintAgent (HTTPS)`.
+3. Run the project. The browser opens the landing page automatically.
+
+Do not put secrets in `appsettings.json`. To enable OpenAI locally, use user secrets:
 
 ```bash
-# Build (should show 0 errors)
+dotnet user-secrets set "OpenAI:ApiKey" "your-api-key"
+```
+
+## Command-line quick start
+
+```bash
+dotnet restore
 dotnet build
+dotnet run --launch-profile "WorkingSprintAgent (HTTP)"
+```
 
-# Run API
-dotnet run --urls="http://localhost:5000"
+The HTTP profile listens at `http://localhost:5080`.
 
-# Test health endpoint
-curl http://localhost:5000/api/sprintreport/health
+Check application health:
 
-# Generate report with sample data
-curl -X POST http://localhost:5000/api/sprintreport/generate \
+```bash
+curl http://localhost:5080/api/sprintreport/health
+```
+
+Generate an HTML report:
+
+```bash
+curl -X POST http://localhost:5080/api/sprintreport/generate \
   -F "csvFile=@sample-data/dummy-sprint.csv" \
   -F "sprintName=Sprint 15" \
-  --output sprint_report.html
+  -F "outputFormat=html" \
+  --output sprint-report.html
 ```
 
-## 📊 API Endpoints
+Generate a PowerPoint report by changing `outputFormat` to `powerpoint` and the output filename to `sprint-report.pptx`.
 
-- `POST /api/sprintreport/generate` - Generate full HTML presentation
-- `POST /api/sprintreport/preview` - Preview data without full report
-- `GET /api/sprintreport/csv-format` - Get CSV format help
-- `GET /api/sprintreport/health` - Health check
+## Main endpoints
 
-## 📁 CSV Format
+- `POST /api/sprintreport/generate` — Generate an HTML or PowerPoint presentation
+- `POST /api/sprintreport/preview` — Preview metrics and insights
+- `GET /api/sprintreport/csv-format` — View CSV requirements and examples
+- `GET /api/sprintreport/health` — Check system health
+- `GET /api/sprintreport/ai-status` — Check AI/fallback status
+- `GET /api/sprintreport/token-usage` — View token and cost data
+- `GET /api/sprintreport/cost-dashboard` — View cost-monitoring data
+- `GET /api/sprintreport/usage-analytics` — View usage analytics
 
-Flexible CSV parsing supports various column names:
+## CSV format
 
-### Required Columns
-- **TaskId**: TASK-001, ID, Key, IssueKey
-- **Title**: Task name, Summary, TaskName
-- **Status**: Done, In Progress, Blocked, etc.
-- **Assignee**: Team member name
+Required columns are `TaskId`, `Title`, `Status`, and `Assignee`. Optional columns include `Type`, `Priority`, `StoryPoints`, `SprintName`, `StartDate`, and `EndDate`. Column aliases and examples are available from `/api/sprintreport/csv-format`.
 
-### Optional Columns
-- **Type**: Story, Bug, Task, Spike
-- **Priority**: Low, Medium, High, Critical
-- **StoryPoints**: Numeric estimation
-- **SprintName**: Sprint identifier
+## Architecture
 
-## 💡 Token Optimization (60-99% Cost Reduction)
-
-1. **Pre-computation** (40% savings): Calculate metrics in C# instead of AI
-2. **Data Compression** (30% savings): Send structured metrics, not raw CSV
-3. **Prompt Engineering** (15% savings): Optimized prompts with clear schema
-4. **Mock Mode** (10% savings): Test without API costs
-5. **Caching Ready** (5% savings): Architecture supports caching patterns
-
-## 🎯 Generated Presentations
-
-Professional HTML presentations include:
-- Executive Summary with key metrics
-- Team Performance analytics
-- Risk identification and blockers
-- Actionable recommendations
-- Next sprint focus areas
-- Detailed breakdowns by status, type, priority
-
-## 🔧 Architecture
-
-```
-CSV Upload → Parse & Validate → Compute Metrics → Generate Insights → Build Presentation
+```text
+CSV upload -> Parse and validate -> Compute metrics -> Generate insights -> Build presentation
 ```
 
-- **CsvSprintDataService**: Intelligent CSV parsing with flexible column mapping
-- **MockInsightGenerationService**: Cost-free insights for testing/development
-- **PresentationBuilderService**: Professional HTML generation
-- **SprintReportController**: RESTful API endpoints
-
-This system is production-ready with zero compilation errors guaranteed!
+When `OpenAI:ApiKey` is empty, all report-generation endpoints remain functional and use `MockInsightGenerationService`. When configured, `OpenAIService` calls the OpenAI REST API directly, tracks token usage, applies daily budget limits, and falls back automatically if a request fails.

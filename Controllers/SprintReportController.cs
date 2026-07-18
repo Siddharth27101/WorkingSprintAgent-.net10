@@ -191,6 +191,37 @@ public class SprintReportController : ControllerBase
             var aiResponse = await _insightService.GenerateEnhancedInsightsAsync(metrics, cancellationToken);
             var insights = aiResponse.Insights;
 
+            object? optimizationAnalysis = null;
+            if (includeOptimization)
+            {
+                var optimizedData = _tokenOptimization.OptimizeSprintData(metrics);
+                var costSavings = _tokenOptimization.EstimateSavings(metrics, new List<OptimizationStrategy>
+                {
+                    OptimizationStrategy.DataCompression,
+                    OptimizationStrategy.PromptOptimization,
+                    OptimizationStrategy.ResponseCaching
+                });
+
+                optimizationAnalysis = new
+                {
+                    DataCompression = new
+                    {
+                        OriginalTokens = optimizedData.OriginalTokenCount,
+                        OptimizedTokens = optimizedData.OptimizedTokenCount,
+                        optimizedData.CompressionRatio,
+                        TokensSaved = optimizedData.OriginalTokenCount - optimizedData.OptimizedTokenCount
+                    },
+                    CostSavings = new
+                    {
+                        costSavings.OriginalCost,
+                        costSavings.OptimizedCost,
+                        costSavings.Savings,
+                        costSavings.SavingsPercentage,
+                        costSavings.RecommendedAction
+                    }
+                };
+            }
+
             // Build comprehensive preview response
             var preview = new
             {
@@ -254,51 +285,9 @@ public class SprintReportController : ControllerBase
                     t.StoryPoints,
                     t.Type,
                     t.Priority
-                })
+                }),
+                OptimizationAnalysis = optimizationAnalysis
             };
-
-            // Add optimization analysis if requested
-            if (includeOptimization)
-            {
-                var optimizedData = _tokenOptimization.OptimizeSprintData(metrics);
-                var costSavings = await _tokenOptimization.EstimateSavings(metrics, new List<OptimizationStrategy> 
-                { 
-                    OptimizationStrategy.DataCompression, 
-                    OptimizationStrategy.PromptOptimization,
-                    OptimizationStrategy.ResponseCaching
-                });
-
-                preview = new
-                {
-                    preview.SprintName,
-                    preview.TaskCount,
-                    preview.ProcessedAt,
-                    preview.Metrics,
-                    preview.Insights,
-                    preview.AIMetadata,
-                    preview.PresentationOptions,
-                    preview.SampleTasks,
-                    
-                    OptimizationAnalysis = new
-                    {
-                        DataCompression = new
-                        {
-                            OriginalTokens = optimizedData.OriginalTokenCount,
-                            OptimizedTokens = optimizedData.OptimizedTokenCount,
-                            CompressionRatio = optimizedData.CompressionRatio,
-                            TokensSaved = optimizedData.OriginalTokenCount - optimizedData.OptimizedTokenCount
-                        },
-                        CostSavings = new
-                        {
-                            costSavings.OriginalCost,
-                            costSavings.OptimizedCost,
-                            costSavings.Savings,
-                            costSavings.SavingsPercentage,
-                            costSavings.RecommendedAction
-                        }
-                    }
-                };
-            }
 
             _logger.LogInformation("Generated preview for sprint '{SprintName}' with {TaskCount} tasks. " +
                                  "AI Cost: ${Cost:F4}, Optimization: {OptimizationIncluded}",
@@ -501,7 +490,8 @@ PROJ-126,Database migration,Blocked,Alice Brown,Task,High,8,Sprint 2024-Q1",
     {
         try
         {
-            var fromDate = DateTime.UtcNow.AddDays(-Math.Abs(days));
+            var safeDays = (int)Math.Clamp(Math.Abs((long)days), 1L, 365L);
+            var fromDate = DateTime.UtcNow.AddDays(-safeDays);
             var usage = await _openAIService.GetTokenUsageAsync(fromDate);
             var dashboard = await _costMonitoring.GetDashboardDataAsync();
             var prediction = await _costMonitoring.PredictCostsAsync(30);
@@ -512,7 +502,7 @@ PROJ-126,Database migration,Blocked,Alice Brown,Task,High,8,Sprint 2024-Q1",
                 {
                     FromDate = usage.FromDate,
                     ToDate = usage.ToDate,
-                    Days = days
+                    Days = safeDays
                 },
                 
                 Summary = new
@@ -673,8 +663,7 @@ PROJ-126,Database migration,Blocked,Alice Brown,Task,High,8,Sprint 2024-Q1",
                 t.Name,
                 t.Description,
                 t.Features,
-                t.RequiresCompanyBranding,
-                SamplePreview = $"/api/templates/{t.Id}/preview" // Future endpoint
+                t.RequiresCompanyBranding
             }),
             
             Recommendations = new
@@ -712,7 +701,8 @@ PROJ-126,Database migration,Blocked,Alice Brown,Task,High,8,Sprint 2024-Q1",
                 });
             }
 
-            var fromDate = DateTime.UtcNow.AddDays(-Math.Abs(days));
+            var safeDays = (int)Math.Clamp(Math.Abs((long)days), 1L, 365L);
+            var fromDate = DateTime.UtcNow.AddDays(-safeDays);
             var reportData = await _costMonitoring.ExportCostReportAsync(format, fromDate);
             
             var contentType = format.ToUpper() switch
@@ -721,7 +711,7 @@ PROJ-126,Database migration,Blocked,Alice Brown,Task,High,8,Sprint 2024-Q1",
                 _ => "text/csv"
             };
             
-            var fileName = $"cost_analysis_report_{DateTime.Now:yyyyMMdd}_{days}days.{format.ToLower()}";
+            var fileName = $"cost_analysis_report_{DateTime.Now:yyyyMMdd}_{safeDays}days.{format.ToLowerInvariant()}";
             
             return File(reportData, contentType, fileName);
         }
@@ -753,11 +743,12 @@ PROJ-126,Database migration,Blocked,Alice Brown,Task,High,8,Sprint 2024-Q1",
                 return StatusCode(500, new { error = "Token usage logger not available" });
             }
 
+            var safeDays = (int)Math.Clamp(Math.Abs((long)days), 1L, 365L);
             var timeRange = new TimeRange
             {
-                StartDate = DateTime.UtcNow.AddDays(-Math.Abs(days)),
+                StartDate = DateTime.UtcNow.AddDays(-safeDays),
                 EndDate = DateTime.UtcNow,
-                Description = $"Last {days} days"
+                Description = $"Last {safeDays} days"
             };
 
             var analytics = await tokenLogger.GenerateAnalyticsSummaryAsync(timeRange);
@@ -799,7 +790,7 @@ PROJ-126,Database migration,Blocked,Alice Brown,Task,High,8,Sprint 2024-Q1",
                     analytics.CostAnalytics.TotalCost,
                     analytics.CostAnalytics.AverageCostPerRequest,
                     analytics.CostAnalytics.PeakDailyCost,
-                    ProjectedMonthlyCost = analytics.CostAnalytics.TotalCost * (30.0m / days),
+                    ProjectedMonthlyCost = analytics.CostAnalytics.TotalCost * (30.0m / safeDays),
                     DailyTrends = analytics.CostAnalytics.DailyTrends.Take(7)
                 },
                 
@@ -822,7 +813,7 @@ PROJ-126,Database migration,Blocked,Alice Brown,Task,High,8,Sprint 2024-Q1",
                     analytics.PerformanceAnalytics.TotalRequests,
                     analytics.PerformanceAnalytics.SuccessRate,
                     Throughput = analytics.PerformanceAnalytics.TotalRequests > 0 
-                        ? analytics.PerformanceAnalytics.TotalRequests / (double)days : 0
+                        ? analytics.PerformanceAnalytics.TotalRequests / (double)safeDays : 0
                 },
                 
                 KeyInsights = analytics.KeyInsights,
@@ -842,9 +833,6 @@ PROJ-126,Database migration,Blocked,Alice Brown,Task,High,8,Sprint 2024-Q1",
             return StatusCode(500, new { error = "Unable to generate usage analytics" });
         }
     }
-    }
-}
-
 
     #region Helper Methods
 

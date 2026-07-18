@@ -35,13 +35,13 @@ public class TokenUsageLogger : ITokenUsageLogger
                 usage.Model,
                 usage.CacheHit
             },
-            ["Context"] = context != null ? new
+            ["Context"] = context != null ? (object)new
             {
                 context.SprintName,
                 context.TaskCount,
                 context.DataSource,
                 context.UserId
-            } : null
+            } : new { }
         });
 
         _logger.LogInformation("Token usage recorded: {Model} - {TotalTokens} tokens (Input: {InputTokens}, Output: {OutputTokens}), " +
