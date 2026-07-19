@@ -18,6 +18,7 @@ public class MockInsightGenerationService : IInsightGenerationService
 
     public Task<SprintInsights> GenerateInsightsAsync(SprintMetrics metrics, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _logger.LogInformation("Generating mock insights for sprint '{SprintName}'", metrics.SprintName);
 
         var insights = new SprintInsights

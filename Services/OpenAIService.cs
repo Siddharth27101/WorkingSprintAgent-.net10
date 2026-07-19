@@ -189,11 +189,18 @@ public class OpenAIService : IOpenAIService
 
             return response;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogInformation(
+                "OpenAI insight generation was cancelled for sprint: {SprintName}",
+                metrics.SprintName);
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error generating AI insights for sprint: {SprintName}", metrics.SprintName);
             
-            // Fallback to basic insights on error
+            // Fallback to basic insights on an OpenAI or parsing failure.
             return GenerateFallbackInsights(metrics);
         }
     }

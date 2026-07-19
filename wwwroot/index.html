@@ -3,160 +3,341 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Working Sprint Agent API</title>
+    <meta name="description" content="Upload sprint CSV data, analyze it with an agent workflow, and download a PowerPoint report.">
+    <title>Working Sprint Agent</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        :root {
+            color-scheme: light;
+            --ink: #182235;
+            --muted: #64748b;
+            --line: #dbe4f0;
+            --panel: rgba(255, 255, 255, .94);
+            --primary: #3157d5;
+            --primary-dark: #243fa7;
+            --accent: #12a594;
+            --danger: #c43d4b;
+            --shadow: 0 24px 70px rgba(37, 55, 91, .14);
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
             min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            color: var(--ink);
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background:
+                radial-gradient(circle at 10% 10%, rgba(49, 87, 213, .15), transparent 32rem),
+                radial-gradient(circle at 90% 20%, rgba(18, 165, 148, .14), transparent 28rem),
+                #f5f8fc;
         }
-        .container {
-            max-width: 800px;
-            background: white;
-            border-radius: 20px;
-            padding: 60px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            text-align: center;
+
+        a { color: inherit; }
+        .shell { width: min(1160px, calc(100% - 32px)); margin: 0 auto; padding: 32px 0 56px; }
+        header { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 38px; }
+        .brand { display: flex; align-items: center; gap: 12px; font-weight: 800; letter-spacing: -.02em; }
+        .brand-mark { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 13px; color: white; background: linear-gradient(135deg, var(--primary), var(--accent)); box-shadow: 0 8px 24px rgba(49, 87, 213, .28); }
+        nav { display: flex; gap: 18px; color: var(--muted); font-size: .92rem; font-weight: 650; }
+        nav a { text-decoration: none; }
+        nav a:hover { color: var(--primary); }
+
+        .hero { display: grid; grid-template-columns: 1.05fr .95fr; gap: 42px; align-items: center; margin-bottom: 34px; }
+        .eyebrow { display: inline-flex; gap: 8px; align-items: center; padding: 7px 11px; border: 1px solid #cad7ff; border-radius: 999px; color: var(--primary-dark); background: #eef2ff; font-size: .78rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+        h1 { margin: 18px 0 16px; max-width: 700px; font-size: clamp(2.35rem, 5vw, 4.6rem); line-height: 1.02; letter-spacing: -.055em; }
+        .hero-copy { max-width: 650px; margin: 0; color: var(--muted); font-size: 1.08rem; line-height: 1.75; }
+
+        .workflow { display: grid; gap: 10px; padding: 24px; border: 1px solid rgba(255, 255, 255, .7); border-radius: 24px; background: linear-gradient(145deg, #1d2a51, #293f7a); box-shadow: var(--shadow); }
+        .workflow-title { margin: 0 0 5px; color: #cbd7ff; font-size: .78rem; text-transform: uppercase; letter-spacing: .12em; }
+        .stage { display: flex; align-items: center; gap: 13px; padding: 13px 15px; border: 1px solid rgba(255, 255, 255, .12); border-radius: 14px; color: white; background: rgba(255, 255, 255, .08); }
+        .stage-number { display: grid; flex: 0 0 29px; height: 29px; place-items: center; border-radius: 9px; color: #142142; background: #dce5ff; font-size: .78rem; font-weight: 900; }
+        .stage strong { display: block; font-size: .91rem; }
+        .stage small { color: #b9c6ed; }
+        .connector { height: 10px; margin-left: 29px; border-left: 2px dashed rgba(255, 255, 255, .28); }
+
+        .workspace { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(300px, .6fr); gap: 22px; align-items: start; }
+        .card { border: 1px solid var(--line); border-radius: 22px; background: var(--panel); box-shadow: 0 14px 45px rgba(54, 72, 110, .08); }
+        .form-card { padding: 28px; }
+        .card h2 { margin: 0 0 7px; font-size: 1.35rem; letter-spacing: -.025em; }
+        .card-intro { margin: 0 0 24px; color: var(--muted); line-height: 1.6; }
+        label { display: block; margin-bottom: 8px; font-size: .86rem; font-weight: 750; }
+        .drop-zone { position: relative; display: grid; min-height: 165px; padding: 24px; place-items: center; border: 2px dashed #b7c5dd; border-radius: 18px; text-align: center; background: #f9fbfe; transition: .2s ease; cursor: pointer; }
+        .drop-zone:hover, .drop-zone.dragging { border-color: var(--primary); background: #f2f5ff; }
+        .drop-zone input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
+        .upload-icon { display: grid; width: 48px; height: 48px; margin: 0 auto 12px; place-items: center; border-radius: 15px; color: var(--primary); background: #e9eeff; font-size: 1.5rem; font-weight: 900; }
+        .drop-zone strong { display: block; margin-bottom: 5px; }
+        .drop-zone span { color: var(--muted); font-size: .86rem; }
+        #fileName { margin-top: 8px; color: var(--primary-dark); font-weight: 750; }
+        .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 17px; margin-top: 20px; }
+        .field.wide { grid-column: 1 / -1; }
+        input[type="text"], select { width: 100%; height: 46px; padding: 0 13px; border: 1px solid #cbd7e6; border-radius: 11px; color: var(--ink); background: white; font: inherit; outline: none; }
+        input[type="text"]:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(49, 87, 213, .12); }
+        .actions { display: flex; flex-wrap: wrap; gap: 11px; margin-top: 23px; }
+        button, .button-link { display: inline-flex; min-height: 46px; padding: 0 19px; align-items: center; justify-content: center; border: 0; border-radius: 11px; font: inherit; font-size: .9rem; font-weight: 800; text-decoration: none; cursor: pointer; transition: .18s ease; }
+        button:hover, .button-link:hover { transform: translateY(-1px); }
+        button:disabled { opacity: .56; transform: none; cursor: wait; }
+        .primary { flex: 1; color: white; background: linear-gradient(135deg, var(--primary), var(--primary-dark)); box-shadow: 0 8px 20px rgba(49, 87, 213, .22); }
+        .secondary { color: var(--primary-dark); background: #eaf0ff; }
+        .tertiary { color: var(--muted); background: #eef2f7; }
+
+        .side-card { overflow: hidden; }
+        .side-header { padding: 22px 23px; color: white; background: linear-gradient(135deg, #17254c, #294483); }
+        .side-header h2 { margin-bottom: 6px; }
+        .side-header p { margin: 0; color: #c4d1f2; font-size: .88rem; }
+        #status { min-height: 210px; padding: 23px; }
+        .idle { color: var(--muted); line-height: 1.65; }
+        .status-line { display: flex; gap: 11px; align-items: flex-start; margin-bottom: 15px; }
+        .status-dot { width: 10px; height: 10px; margin-top: 6px; border-radius: 50%; background: #cbd5e1; box-shadow: 0 0 0 4px #f1f5f9; }
+        .status-line.active .status-dot { background: var(--primary); box-shadow: 0 0 0 4px #e6ebff; animation: pulse 1.2s infinite; }
+        .status-line.done .status-dot { background: var(--accent); box-shadow: 0 0 0 4px #e2f7f3; }
+        .status-line strong { display: block; font-size: .9rem; }
+        .status-line small { color: var(--muted); }
+        .result { padding: 16px; border-radius: 13px; background: #edf9f6; color: #137466; line-height: 1.55; }
+        .error { padding: 16px; border-radius: 13px; background: #fff0f1; color: var(--danger); line-height: 1.55; }
+        .preview-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0; }
+        .metric { padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: white; }
+        .metric strong { display: block; font-size: 1.35rem; }
+        .metric small { color: var(--muted); }
+        .summary { margin-top: 14px; color: var(--muted); font-size: .9rem; line-height: 1.6; }
+        .footnote { margin-top: 16px; color: var(--muted); font-size: .78rem; }
+        @keyframes pulse { 50% { transform: scale(1.35); } }
+
+        @media (max-width: 860px) {
+            .hero, .workspace { grid-template-columns: 1fr; }
+            .hero { gap: 28px; }
+            nav { display: none; }
         }
-        h1 {
-            font-size: 3rem;
-            color: #2c3e50;
-            margin-bottom: 20px;
-            font-weight: 300;
+        @media (max-width: 560px) {
+            .shell { width: min(100% - 20px, 1160px); padding-top: 18px; }
+            .fields { grid-template-columns: 1fr; }
+            .field.wide { grid-column: auto; }
+            .form-card { padding: 20px; }
+            h1 { font-size: 2.55rem; }
         }
-        .subtitle {
-            font-size: 1.2rem;
-            color: #7f8c8d;
-            margin-bottom: 40px;
-        }
-        .features {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 30px;
-            margin: 40px 0;
-        }
-        .feature {
-            background: #f8f9fa;
-            padding: 30px;
-            border-radius: 15px;
-            border-left: 5px solid #3498db;
-        }
-        .feature h3 {
-            color: #2c3e50;
-            margin-bottom: 15px;
-            font-size: 1.3rem;
-        }
-        .feature p {
-            color: #5a6c7d;
-            font-size: 0.95rem;
-        }
-        .cta-buttons {
-            margin-top: 40px;
-            display: flex;
-            gap: 20px;
-            justify-content: center;
-            flex-wrap: wrap;
-        }
-        .btn {
-            display: inline-block;
-            padding: 15px 30px;
-            border-radius: 50px;
-            text-decoration: none;
-            font-weight: 600;
-            transition: all 0.3s ease;
-            border: none;
-            cursor: pointer;
-            font-size: 1rem;
-        }
-        .btn-primary {
-            background: linear-gradient(135deg, #3498db, #2980b9);
-            color: white;
-        }
-        .btn-secondary {
-            background: transparent;
-            color: #3498db;
-            border: 2px solid #3498db;
-        }
-        .btn:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 10px 25px rgba(52, 152, 219, 0.3);
-        }
-        .api-info {
-            margin-top: 40px;
-            padding: 30px;
-            background: #ecf0f1;
-            border-radius: 15px;
-            text-align: left;
-        }
-        .api-info h3 {
-            color: #2c3e50;
-            margin-bottom: 15px;
-            text-align: center;
-        }
-        .endpoint {
-            background: white;
-            padding: 10px 15px;
-            margin: 10px 0;
-            border-radius: 8px;
-            font-family: 'Courier New', monospace;
-            color: #27ae60;
-            border-left: 4px solid #27ae60;
-        }
-        .status-badge {
-            display: inline-block;
-            background: #27ae60;
-            color: white;
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            margin-bottom: 20px;
-        }
+        @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }
     </style>
 </head>
 <body>
-    <div class="container">
-        <span class="status-badge">API ready</span>
-        <h1>Working Sprint Agent</h1>
-        <p class="subtitle">AI-Powered Sprint Analysis & Presentation Generation</p>
-        
-        <div class="features">
-            <div class="feature">
-                <h3>AI Insights</h3>
-                <p>Advanced sprint analysis using OpenAI GPT models for intelligent recommendations and insights.</p>
-            </div>
-            <div class="feature">
-                <h3>PowerPoint Generation</h3>
-                <p>Stakeholder-ready presentations with professional charts, metrics, and executive summaries.</p>
-            </div>
-            <div class="feature">
-                <h3>Cost Optimized</h3>
-                <p>Smart caching, token usage tracking, and optimization strategies to minimize AI costs.</p>
-            </div>
-            <div class="feature">
-                <h3>Multiple Templates</h3>
-                <p>Professional, Modern, Corporate, and Minimal presentation templates with custom branding.</p>
-            </div>
-        </div>
+    <main class="shell">
+        <header>
+            <div class="brand"><span class="brand-mark">W</span> Working Sprint Agent</div>
+            <nav aria-label="Application links">
+                <a href="/api/sprintreport/sample-csv">Sample CSV</a>
+                <a href="/api/sprintreport/csv-format" target="_blank" rel="noreferrer">CSV guide</a>
+                <a href="/swagger" target="_blank" rel="noreferrer">API docs</a>
+            </nav>
+        </header>
 
-        <div class="cta-buttons">
-            <a href="/swagger" class="btn btn-primary">Swagger API demonstration</a>
-            <a href="/api/sprintreport/csv-format" class="btn btn-secondary">CSV format guide</a>
-        </div>
+        <section class="hero">
+            <div>
+                <span class="eyebrow">ASP.NET Core · .NET 10</span>
+                <h1>Turn sprint data into a stakeholder-ready deck.</h1>
+                <p class="hero-copy">Upload a CSV and let the orchestrator coordinate parsing, sprint analysis with GPT-4o mini, and PowerPoint generation. If OpenAI is not configured, the analysis agent automatically uses a deterministic fallback.</p>
+            </div>
+            <div class="workflow" aria-label="Agent workflow">
+                <p class="workflow-title">Live architecture</p>
+                <div class="stage"><span class="stage-number">1</span><div><strong>Agent Orchestrator</strong><small>Coordinates every workflow stage</small></div></div>
+                <div class="connector"></div>
+                <div class="stage"><span class="stage-number">2</span><div><strong>File Upload Agent</strong><small>Validates CSV and calculates metrics</small></div></div>
+                <div class="connector"></div>
+                <div class="stage"><span class="stage-number">3</span><div><strong>Analysis Agent</strong><small>GPT-4o mini or local fallback</small></div></div>
+                <div class="connector"></div>
+                <div class="stage"><span class="stage-number">4</span><div><strong>PPT Agent</strong><small>Builds and returns the presentation</small></div></div>
+            </div>
+        </section>
 
-        <div class="api-info">
-            <h3>Quick Start API Endpoints</h3>
-            <div class="endpoint">POST /api/sprintreport/generate - Generate sprint presentation</div>
-            <div class="endpoint">POST /api/sprintreport/preview - Preview sprint data</div>
-            <div class="endpoint">GET /api/sprintreport/health - System health check</div>
-            <div class="endpoint">GET /api/sprintreport/ai-status - AI service status</div>
-        </div>
-    </div>
+        <section class="workspace">
+            <form id="reportForm" class="card form-card">
+                <h2>Create a sprint report</h2>
+                <p class="card-intro">Required CSV columns: TaskId, Title, Status, and Assignee. Maximum file size: 10 MB.</p>
+
+                <label for="csvFile">Sprint CSV</label>
+                <div id="dropZone" class="drop-zone">
+                    <input id="csvFile" name="CsvFile" type="file" accept=".csv,text/csv" required>
+                    <div>
+                        <span class="upload-icon" aria-hidden="true">↑</span>
+                        <strong>Drop a CSV here or choose a file</strong>
+                        <span>Only .csv files are accepted</span>
+                        <div id="fileName" aria-live="polite"></div>
+                    </div>
+                </div>
+
+                <div class="fields">
+                    <div class="field">
+                        <label for="sprintName">Sprint name <span aria-hidden="true">(optional)</span></label>
+                        <input id="sprintName" name="SprintName" type="text" maxlength="150" placeholder="e.g. Sprint 24">
+                    </div>
+                    <div class="field">
+                        <label for="template">Presentation template</label>
+                        <select id="template" name="Template">
+                            <option value="professional">Professional</option>
+                            <option value="modern">Modern</option>
+                            <option value="corporate">Corporate</option>
+                            <option value="minimal">Minimal</option>
+                        </select>
+                    </div>
+                    <div class="field wide">
+                        <label for="companyName">Company name <span aria-hidden="true">(optional)</span></label>
+                        <input id="companyName" name="CompanyName" type="text" maxlength="150" placeholder="Shown on the title slide">
+                    </div>
+                </div>
+
+                <div class="actions">
+                    <button id="generateButton" class="primary" type="submit">Generate &amp; download PowerPoint</button>
+                    <button id="previewButton" class="secondary" type="button">Preview analysis</button>
+                    <a class="button-link tertiary" href="/api/sprintreport/sample-csv">Get sample</a>
+                </div>
+                <p class="footnote">Your uploaded CSV is processed in memory and is not stored by this application.</p>
+            </form>
+
+            <aside class="card side-card" aria-live="polite">
+                <div class="side-header">
+                    <h2>Workflow status</h2>
+                    <p>Agent activity and analysis results appear here.</p>
+                </div>
+                <div id="status"><p class="idle">Select a sprint CSV, then preview the analysis or generate the final PowerPoint.</p></div>
+            </aside>
+        </section>
+    </main>
+
+    <script>
+        const form = document.getElementById('reportForm');
+        const fileInput = document.getElementById('csvFile');
+        const fileName = document.getElementById('fileName');
+        const dropZone = document.getElementById('dropZone');
+        const statusPanel = document.getElementById('status');
+        const generateButton = document.getElementById('generateButton');
+        const previewButton = document.getElementById('previewButton');
+
+        fileInput.addEventListener('change', () => {
+            fileName.textContent = fileInput.files[0]
+                ? `${fileInput.files[0].name} · ${formatBytes(fileInput.files[0].size)}`
+                : '';
+        });
+        ['dragenter', 'dragover'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.add('dragging')));
+        ['dragleave', 'drop'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragging')));
+
+        form.addEventListener('submit', async event => {
+            event.preventDefault();
+            if (!validateFile()) return;
+            setBusy(true);
+            showPipeline('Generating your PowerPoint…');
+
+            try {
+                const data = createFormData();
+                data.append('OutputFormat', 'powerpoint');
+                const response = await fetch('/api/SprintReport/generate', { method: 'POST', body: data });
+                if (!response.ok) throw new Error(await getErrorMessage(response));
+
+                const blob = await response.blob();
+                const downloadName = getDownloadName(response.headers.get('Content-Disposition')) || 'Sprint_Report.pptx';
+                const objectUrl = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = objectUrl;
+                link.download = downloadName;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+
+                statusPanel.innerHTML = `<div class="result"><strong>PowerPoint ready</strong><br>${escapeHtml(downloadName)} (${formatBytes(blob.size)}) has been downloaded.</div>`;
+            } catch (error) {
+                showError(error);
+            } finally {
+                setBusy(false);
+            }
+        });
+
+        previewButton.addEventListener('click', async () => {
+            if (!validateFile()) return;
+            setBusy(true);
+            showPipeline('Analyzing sprint data…');
+
+            try {
+                const data = createFormData();
+                data.append('IncludeOptimization', 'false');
+                const response = await fetch('/api/SprintReport/preview', { method: 'POST', body: data });
+                if (!response.ok) throw new Error(await getErrorMessage(response));
+                const preview = await response.json();
+                const metrics = preview.metrics;
+                statusPanel.innerHTML = `
+                    <div class="result"><strong>${escapeHtml(preview.sprintName)}</strong><br>Analysis completed${preview.aiMetadata.fromCache ? ' from cache' : ''}.</div>
+                    <div class="preview-metrics">
+                        <div class="metric"><strong>${metrics.completionRatePercent}%</strong><small>Completion</small></div>
+                        <div class="metric"><strong>${metrics.completedTasks}/${metrics.totalTasks}</strong><small>Tasks done</small></div>
+                        <div class="metric"><strong>${metrics.blockedTasks}</strong><small>Blocked</small></div>
+                        <div class="metric"><strong>${metrics.completedStoryPoints}/${metrics.totalStoryPoints}</strong><small>Story points</small></div>
+                    </div>
+                    <p class="summary">${escapeHtml(preview.insights.executiveSummary)}</p>`;
+            } catch (error) {
+                showError(error);
+            } finally {
+                setBusy(false);
+            }
+        });
+
+        function createFormData() {
+            const data = new FormData();
+            data.append('CsvFile', fileInput.files[0]);
+            data.append('SprintName', document.getElementById('sprintName').value);
+            data.append('Template', document.getElementById('template').value);
+            data.append('CompanyName', document.getElementById('companyName').value);
+            return data;
+        }
+
+        function validateFile() {
+            const file = fileInput.files[0];
+            if (!file) { showError(new Error('Choose a CSV file before continuing.')); return false; }
+            if (!file.name.toLowerCase().endsWith('.csv')) { showError(new Error('The selected file must use the .csv extension.')); return false; }
+            if (file.size > 10 * 1024 * 1024) { showError(new Error('The selected file is larger than 10 MB.')); return false; }
+            return true;
+        }
+
+        function setBusy(busy) {
+            generateButton.disabled = busy;
+            previewButton.disabled = busy;
+            generateButton.textContent = busy ? 'Agents are working…' : 'Generate & download PowerPoint';
+        }
+
+        function showPipeline(message) {
+            statusPanel.innerHTML = `
+                <div class="status-line done"><span class="status-dot"></span><div><strong>File Upload Agent</strong><small>CSV selected and ready</small></div></div>
+                <div class="status-line active"><span class="status-dot"></span><div><strong>Analysis Agent</strong><small>${escapeHtml(message)}</small></div></div>
+                <div class="status-line"><span class="status-dot"></span><div><strong>PPT Agent</strong><small>Waiting for analysis</small></div></div>`;
+        }
+
+        function showError(error) {
+            const message = error instanceof Error ? error.message : 'Unexpected workflow error.';
+            statusPanel.innerHTML = `<div class="error"><strong>Workflow stopped</strong><br>${escapeHtml(message)}</div>`;
+        }
+
+        async function getErrorMessage(response) {
+            try {
+                const payload = await response.json();
+                if (payload.error) return payload.error;
+                if (payload.errors) return Object.values(payload.errors).flat().join(' ');
+            } catch { /* The response was not JSON. */ }
+            return `Request failed with status ${response.status}.`;
+        }
+
+        function getDownloadName(header) {
+            if (!header) return null;
+            const encoded = header.match(/filename\*=UTF-8''([^;]+)/i);
+            if (encoded) return decodeURIComponent(encoded[1]);
+            const plain = header.match(/filename="?([^";]+)"?/i);
+            return plain ? plain[1] : null;
+        }
+
+        function formatBytes(bytes) {
+            if (!bytes) return '0 B';
+            const units = ['B', 'KB', 'MB'];
+            const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+            return `${(bytes / Math.pow(1024, index)).toFixed(index ? 1 : 0)} ${units[index]}`;
+        }
+
+        function escapeHtml(value) {
+            const node = document.createElement('div');
+            node.textContent = String(value ?? '');
+            return node.innerHTML;
+        }
+    </script>
 </body>
 </html>

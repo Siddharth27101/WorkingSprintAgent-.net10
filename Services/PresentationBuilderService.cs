@@ -23,8 +23,10 @@ public class PresentationBuilderService : IPresentationBuilderService
     public byte[] BuildPowerPointPresentation(
         SprintMetrics metrics,
         SprintInsights insights,
-        PresentationOptions? options = null)
+        PresentationOptions? options = null,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         options ??= new PresentationOptions();
 
         _logger.LogInformation(
@@ -33,14 +35,23 @@ public class PresentationBuilderService : IPresentationBuilderService
             options.Template);
 
         // Do not return HTML from this method: callers label these bytes as a .pptx file.
-        return _powerPointService.CreatePresentationFromTemplate(metrics, insights, options);
+        return _powerPointService.CreatePresentationFromTemplate(
+            metrics,
+            insights,
+            options,
+            cancellationToken);
     }
 
-    public byte[] BuildPresentation(SprintMetrics metrics, SprintInsights insights)
+    public byte[] BuildPresentation(
+        SprintMetrics metrics,
+        SprintInsights insights,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _logger.LogInformation("Building HTML presentation for sprint '{SprintName}'", metrics.SprintName);
 
         var bytes = Encoding.UTF8.GetBytes(BuildHtmlPresentation(metrics, insights));
+        cancellationToken.ThrowIfCancellationRequested();
         _logger.LogInformation("Generated HTML presentation with {Size} bytes", bytes.Length);
         return bytes;
     }
