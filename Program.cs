@@ -1,9 +1,11 @@
 using System.Reflection;
+using Microsoft.Extensions.Options;
 using WorkingSprintAgent.Middleware;
 using WorkingSprintAgent.Models;
 using WorkingSprintAgent.Services;
 using WorkingSprintAgent.Services.Agents;
 using WorkingSprintAgent.Services.Orchestration;
+using WorkingSprintAgent.Services.Plugins;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,6 +18,10 @@ if (!string.IsNullOrWhiteSpace(conventionalOpenAiKey))
 
 builder.Services.Configure<OpenAIConfiguration>(
     builder.Configuration.GetSection(OpenAIConfiguration.ConfigSection));
+builder.Services.AddOptions<SemanticKernelOptions>()
+    .Bind(builder.Configuration.GetSection(SemanticKernelOptions.ConfigSection))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
@@ -38,11 +44,20 @@ builder.Services.AddSingleton<ICostMonitoringService, InMemoryCostMonitoringServ
 builder.Services.AddScoped<ITokenUsageLogger, TokenUsageLogger>();
 builder.Services.AddScoped<IInsightGenerationService, OpenAIInsightGenerationService>();
 
-// Agent workflow: upload/parse -> analyze -> build downloadable presentation.
+// Deterministic workflow retained as the default and automatic fallback.
 builder.Services.AddScoped<IFileUploadAgent, FileUploadAgent>();
 builder.Services.AddScoped<IAnalysisAgent, AnalysisAgent>();
+builder.Services.AddScoped<MockInsightGenerationService>();
 builder.Services.AddScoped<IPresentationAgent, PresentationAgent>();
-builder.Services.AddScoped<ISprintReportOrchestrator, SprintReportOrchestrator>();
+builder.Services.AddScoped<DeterministicSprintReportOrchestrator>();
+builder.Services.AddScoped<LocalSprintReportFallback>();
+
+// Optional Semantic Kernel workflow: scoped state, least-privilege plugins, and role-specific agents.
+builder.Services.AddScoped<ISprintWorkflowStateStore, ScopedSprintWorkflowStateStore>();
+builder.Services.AddScoped<CsvSprintPlugin>();
+builder.Services.AddScoped<PresentationPlugin>();
+builder.Services.AddScoped<ISemanticKernelAgentFactory, SemanticKernelAgentFactory>();
+builder.Services.AddScoped<ISprintReportOrchestrator, SemanticKernelSprintReportOrchestrator>();
 
 builder.Services.AddCors(options =>
 {
@@ -88,7 +103,10 @@ app.Use(async (context, next) =>
     if (context.Request.Path == "/" && acceptsJson)
     {
         var insightService = context.RequestServices.GetRequiredService<IInsightGenerationService>();
-        await Results.Ok(CreateSystemInformation(insightService)).ExecuteAsync(context);
+        var semanticKernel = context.RequestServices
+            .GetRequiredService<IOptions<SemanticKernelOptions>>()
+            .Value;
+        await Results.Ok(CreateSystemInformation(insightService, semanticKernel)).ExecuteAsync(context);
         return;
     }
 
@@ -102,27 +120,45 @@ app.UseCors("AllowAll");
 app.UseAuthorization();
 app.MapControllers();
 
-app.MapGet("/api/system", (IInsightGenerationService insightService) =>
-    Results.Ok(CreateSystemInformation(insightService)))
+app.MapGet(
+    "/api/system",
+    (IInsightGenerationService insightService, IOptions<SemanticKernelOptions> semanticKernel) =>
+        Results.Ok(CreateSystemInformation(insightService, semanticKernel.Value)))
 .WithTags("System")
 .WithSummary("Get service information");
 
 app.Run();
 
-static object CreateSystemInformation(IInsightGenerationService insightService)
+static object CreateSystemInformation(
+    IInsightGenerationService insightService,
+    SemanticKernelOptions semanticKernel)
 {
     var serviceStatus = insightService.GetServiceStatus();
+    var semanticKernelActive = semanticKernel.Enabled && serviceStatus.IsAIEnabled;
     return new
     {
         Service = "Working Sprint Agent API",
-        Version = "2.0.0",
+        Version = "3.0.0",
         Framework = ".NET 10",
         Status = "Running",
         Swagger = "/swagger",
         serviceStatus.IsAIEnabled,
         serviceStatus.ServiceType,
         serviceStatus.Model,
-        Workflow = "Agent Orchestrator -> File Upload Agent -> Analysis Agent (GPT-4o mini/fallback) -> PPT Agent -> Download",
+        SemanticKernel = new
+        {
+            semanticKernel.Enabled,
+            Model = semanticKernel.Model,
+            semanticKernel.MaxReviewerRevisions,
+            semanticKernel.ReviewerApprovalThreshold,
+            semanticKernel.EnableManagerSelection,
+            ActiveWorkflow = semanticKernelActive
+                ? "Semantic Kernel multi-agent"
+                : "Deterministic fallback"
+        },
+        Workflow = semanticKernelActive
+            ? "CSV plugin -> ChatCompletionAgent analyst -> coach -> quality reviewer -> optional manager -> presentation plugin"
+            : "Deterministic CSV parse -> analysis -> presentation",
         MainEndpoints = new[]
         {
             "GET /api/sprintreport/sample-csv",

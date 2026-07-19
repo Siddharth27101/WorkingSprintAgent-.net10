@@ -4,24 +4,25 @@ using WorkingSprintAgent.Services.Agents;
 namespace WorkingSprintAgent.Services.Orchestration;
 
 /// <summary>
-/// Runs the sprint report pipeline in order and keeps HTTP concerns out of the agents.
+/// Local, non-AI fallback used after an agent workflow fails or cannot pass quality review.
 /// </summary>
-public sealed class SprintReportOrchestrator : ISprintReportOrchestrator
+public sealed class LocalSprintReportFallback : ISprintReportOrchestrator
 {
     private readonly IFileUploadAgent _fileUploadAgent;
-    private readonly IAnalysisAgent _analysisAgent;
     private readonly IPresentationAgent _presentationAgent;
-    private readonly ILogger<SprintReportOrchestrator> _logger;
+    private readonly IAnalysisAgent _analysisAgent;
+    private readonly ILogger<LocalSprintReportFallback> _logger;
 
-    public SprintReportOrchestrator(
+    public LocalSprintReportFallback(
         IFileUploadAgent fileUploadAgent,
-        IAnalysisAgent analysisAgent,
         IPresentationAgent presentationAgent,
-        ILogger<SprintReportOrchestrator> logger)
+        MockInsightGenerationService insightService,
+        ILogger<AnalysisAgent> analysisLogger,
+        ILogger<LocalSprintReportFallback> logger)
     {
         _fileUploadAgent = fileUploadAgent;
-        _analysisAgent = analysisAgent;
         _presentationAgent = presentationAgent;
+        _analysisAgent = new AnalysisAgent(insightService, analysisLogger);
         _logger = logger;
     }
 
@@ -30,16 +31,10 @@ public sealed class SprintReportOrchestrator : ISprintReportOrchestrator
         string? sprintName,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Agent Orchestrator started analysis workflow");
-
+        _logger.LogInformation("Local fallback started analysis workflow");
         var data = await _fileUploadAgent.ProcessAsync(csvStream, sprintName, cancellationToken);
-        var aiResponse = await _analysisAgent.AnalyzeAsync(data.Metrics, cancellationToken);
-
-        _logger.LogInformation(
-            "Agent Orchestrator completed analysis workflow for '{SprintName}'",
-            data.Metrics.SprintName);
-
-        return new SprintAnalysisResult(data, aiResponse);
+        var response = await _analysisAgent.AnalyzeAsync(data.Metrics, cancellationToken);
+        return new SprintAnalysisResult(data, response);
     }
 
     public async Task<SprintReportWorkflowResult> GenerateAsync(
@@ -48,19 +43,12 @@ public sealed class SprintReportOrchestrator : ISprintReportOrchestrator
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
-        _logger.LogInformation("Agent Orchestrator started complete report workflow");
-
         var analysis = await AnalyzeAsync(csvStream, options.SprintName, cancellationToken);
         var presentation = await _presentationAgent.CreateAsync(
             analysis.Data.Metrics,
             analysis.AIResponse.Insights,
             options,
             cancellationToken);
-
-        _logger.LogInformation(
-            "Agent Orchestrator completed report workflow with '{FileName}'",
-            presentation.FileName);
-
         return new SprintReportWorkflowResult(analysis, presentation);
     }
 }

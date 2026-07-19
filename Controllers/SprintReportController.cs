@@ -115,6 +115,14 @@ public class SprintReportController : ControllerBase
                 helpUrl = "/api/sprintreport/csv-format"
             });
         }
+        catch (TimeoutException ex)
+        {
+            _logger.LogWarning(ex, "Sprint report generation timed out");
+            return StatusCode(StatusCodes.Status504GatewayTimeout, new
+            {
+                error = "The report workflow timed out. Please try again."
+            });
+        }
         catch (OperationCanceledException)
         {
             _logger.LogWarning("Sprint report generation was cancelled");
@@ -283,6 +291,14 @@ public class SprintReportController : ControllerBase
                 helpUrl = "/api/sprintreport/csv-format"
             });
         }
+        catch (TimeoutException ex)
+        {
+            _logger.LogWarning(ex, "Sprint data preview timed out");
+            return StatusCode(StatusCodes.Status504GatewayTimeout, new
+            {
+                error = "The preview workflow timed out. Please try again."
+            });
+        }
         catch (OperationCanceledException)
         {
             _logger.LogWarning("Sprint data preview was cancelled");
@@ -391,7 +407,7 @@ public class SprintReportController : ControllerBase
         {
             Status = "Healthy",
             Timestamp = DateTime.UtcNow,
-            Version = "2.0.0",
+            Version = "3.0.0",
             Environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production",
             
             Services = new
