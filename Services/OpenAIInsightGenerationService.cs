@@ -56,6 +56,13 @@ public class OpenAIInsightGenerationService : IInsightGenerationService
 
             return aiResponse.Insights;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogInformation(
+                "Insight generation was cancelled for sprint '{SprintName}'",
+                metrics.SprintName);
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error generating AI insights for sprint '{SprintName}', falling back to mock service", metrics.SprintName);
@@ -84,6 +91,13 @@ public class OpenAIInsightGenerationService : IInsightGenerationService
                 response.OptimizationSuggestions.Count);
 
             return response;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogInformation(
+                "Enhanced insight generation was cancelled for sprint '{SprintName}'",
+                metrics.SprintName);
+            throw;
         }
         catch (Exception ex)
         {

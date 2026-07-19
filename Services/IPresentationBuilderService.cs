@@ -13,16 +13,25 @@ public interface IPresentationBuilderService
     /// <param name="metrics">Sprint metrics data</param>
     /// <param name="insights">AI-generated insights</param>
     /// <param name="options">Presentation customization options</param>
+    /// <param name="cancellationToken">Stops presentation generation when the request is cancelled.</param>
     /// <returns>PowerPoint file as byte array</returns>
-    byte[] BuildPowerPointPresentation(SprintMetrics metrics, SprintInsights insights, PresentationOptions? options = null);
+    byte[] BuildPowerPointPresentation(
+        SprintMetrics metrics,
+        SprintInsights insights,
+        PresentationOptions? options = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Build HTML presentation (fallback option)
     /// </summary>
     /// <param name="metrics">Sprint metrics data</param>
     /// <param name="insights">AI-generated insights</param>
+    /// <param name="cancellationToken">Stops presentation generation when the request is cancelled.</param>
     /// <returns>HTML content as byte array</returns>
-    byte[] BuildPresentation(SprintMetrics metrics, SprintInsights insights);
+    byte[] BuildPresentation(
+        SprintMetrics metrics,
+        SprintInsights insights,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Generate presentation preview/summary

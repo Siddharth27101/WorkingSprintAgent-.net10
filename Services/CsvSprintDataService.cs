@@ -1,9 +1,13 @@
+using System.Globalization;
 using WorkingSprintAgent.Models;
 
 namespace WorkingSprintAgent.Services;
 
 public class CsvSprintDataService : ICsvSprintDataService
 {
+    private const int MaximumTaskCount = 2_000;
+    private static readonly string[] RequiredHeaders = ["TaskId", "Title", "Status", "Assignee"];
+
     private readonly ILogger<CsvSprintDataService> _logger;
 
     public CsvSprintDataService(ILogger<CsvSprintDataService> logger)
@@ -11,36 +15,65 @@ public class CsvSprintDataService : ICsvSprintDataService
         _logger = logger;
     }
 
-    public async Task<List<SprintTask>> ParseAsync(Stream csvStream)
+    public async Task<List<SprintTask>> ParseAsync(
+        Stream csvStream,
+        CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(csvStream);
+        cancellationToken.ThrowIfCancellationRequested();
+
         var records = new List<SprintTask>();
         using var reader = new StreamReader(csvStream);
         
-        var headerLine = await reader.ReadLineAsync();
+        var headerLine = await reader.ReadLineAsync(cancellationToken);
         if (string.IsNullOrWhiteSpace(headerLine))
         {
-            throw new InvalidOperationException("CSV file appears to be empty or missing header row.");
+            throw new InvalidDataException("CSV file appears to be empty or missing a header row.");
         }
 
         var headers = ParseCsvLine(headerLine);
         var headerMap = CreateHeaderMap(headers);
+        var missingHeaders = RequiredHeaders.Where(header => !headerMap.ContainsKey(header)).ToArray();
+        if (missingHeaders.Length > 0)
+        {
+            throw new InvalidDataException(
+                $"CSV is missing required columns: {string.Join(", ", missingHeaders)}.");
+        }
 
         string? line;
-        int lineNumber = 2;
-        while ((line = await reader.ReadLineAsync()) is not null)
+        var lineNumber = 2;
+        while ((line = await reader.ReadLineAsync(cancellationToken)) is not null)
         {
-            if (string.IsNullOrWhiteSpace(line)) continue;
+            cancellationToken.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                lineNumber++;
+                continue;
+            }
 
             try
             {
                 var values = ParseCsvLine(line);
                 var task = ParseSprintTask(values, headerMap);
-                if (task is not null) records.Add(task);
+                if (task is not null)
+                {
+                    records.Add(task);
+                    if (records.Count > MaximumTaskCount)
+                    {
+                        throw new InvalidDataException(
+                            $"CSV contains more than the supported maximum of {MaximumTaskCount:N0} tasks.");
+                    }
+                }
+            }
+            catch (InvalidDataException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to parse line {LineNumber}: {Line}", lineNumber, line);
+                _logger.LogWarning(ex, "Failed to parse CSV line {LineNumber}", lineNumber);
             }
+
             lineNumber++;
         }
 
@@ -48,7 +81,7 @@ public class CsvSprintDataService : ICsvSprintDataService
 
         if (records.Count == 0)
         {
-            throw new InvalidOperationException("No valid rows could be parsed from the CSV.");
+            throw new InvalidDataException("No valid task rows could be parsed from the CSV.");
         }
 
         return records;
@@ -181,7 +214,7 @@ public class CsvSprintDataService : ICsvSprintDataService
 
     private static bool IsHeaderMatch(string normalized, params string[] matches)
     {
-        return matches.Any(m => normalized.Contains(m));
+        return matches.Any(match => normalized.Equals(match, StringComparison.OrdinalIgnoreCase));
     }
 
     private static SprintTask? ParseSprintTask(string[] values, Dictionary<string, int> headerMap)
@@ -207,18 +240,30 @@ public class CsvSprintDataService : ICsvSprintDataService
             task.Priority = values[idx].Trim('"');
         
         if (headerMap.TryGetValue("StoryPoints", out idx) && idx < values.Length)
-            if (double.TryParse(values[idx].Trim('"'), out var points))
+            if (double.TryParse(
+                values[idx].Trim('"'),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var points))
                 task.StoryPoints = points;
         
         if (headerMap.TryGetValue("SprintName", out idx) && idx < values.Length)
             task.SprintName = values[idx].Trim('"');
         
         if (headerMap.TryGetValue("StartDate", out idx) && idx < values.Length)
-            if (DateTime.TryParse(values[idx].Trim('"'), out var startDate))
+            if (DateTime.TryParse(
+                values[idx].Trim('"'),
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces,
+                out var startDate))
                 task.StartDate = startDate;
         
         if (headerMap.TryGetValue("EndDate", out idx) && idx < values.Length)
-            if (DateTime.TryParse(values[idx].Trim('"'), out var endDate))
+            if (DateTime.TryParse(
+                values[idx].Trim('"'),
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces,
+                out var endDate))
                 task.EndDate = endDate;
 
         return !string.IsNullOrWhiteSpace(task.TaskId) || !string.IsNullOrWhiteSpace(task.Title) 

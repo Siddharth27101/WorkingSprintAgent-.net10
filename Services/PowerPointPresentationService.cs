@@ -22,11 +22,13 @@ public class PowerPointPresentationService
     public byte[] CreatePresentationFromTemplate(
         SprintMetrics metrics,
         SprintInsights insights,
-        PresentationOptions options)
+        PresentationOptions options,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(metrics);
         ArgumentNullException.ThrowIfNull(insights);
         ArgumentNullException.ThrowIfNull(options);
+        cancellationToken.ThrowIfCancellationRequested();
 
         var slides = CreateSlides(metrics, insights, options);
         var theme = GetTheme(options.Template);
@@ -34,6 +36,7 @@ public class PowerPointPresentationService
 
         using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             WriteEntry(archive, "[Content_Types].xml", BuildContentTypes(slides.Count));
             WriteEntry(archive, "_rels/.rels", PackageRelationships);
             WriteEntry(archive, "ppt/presentation.xml", BuildPresentation(slides.Count));
@@ -46,12 +49,14 @@ public class PowerPointPresentationService
 
             for (var index = 0; index < slides.Count; index++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var slideNumber = index + 1;
                 WriteEntry(archive, $"ppt/slides/slide{slideNumber}.xml", BuildSlide(slides[index], theme));
                 WriteEntry(archive, $"ppt/slides/_rels/slide{slideNumber}.xml.rels", SlideRelationships);
             }
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         var bytes = stream.ToArray();
         _logger.LogInformation(
             "Created {SlideCount}-slide PowerPoint presentation for sprint '{SprintName}' ({Size} bytes)",

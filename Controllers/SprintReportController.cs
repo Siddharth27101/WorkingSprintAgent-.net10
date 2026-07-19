@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using WorkingSprintAgent.Models;
 using WorkingSprintAgent.Services;
+using WorkingSprintAgent.Services.Orchestration;
 
 namespace WorkingSprintAgent.Controllers;
 
@@ -19,7 +20,7 @@ public class SprintReportController : ControllerBase
         "PROJ-125,Update user profile,To Do,Bob Johnson,Story,Medium,3,Sprint 2026-Q3\n" +
         "PROJ-126,Database migration,Blocked,Alice Brown,Task,High,8,Sprint 2026-Q3\n";
 
-    private readonly ICsvSprintDataService _csvService;
+    private readonly ISprintReportOrchestrator _orchestrator;
     private readonly IInsightGenerationService _insightService;
     private readonly IPresentationBuilderService _presentationService;
     private readonly IOpenAIService _openAIService;
@@ -28,7 +29,7 @@ public class SprintReportController : ControllerBase
     private readonly ILogger<SprintReportController> _logger;
 
     public SprintReportController(
-        ICsvSprintDataService csvService,
+        ISprintReportOrchestrator orchestrator,
         IInsightGenerationService insightService,
         IPresentationBuilderService presentationService,
         IOpenAIService openAIService,
@@ -36,7 +37,7 @@ public class SprintReportController : ControllerBase
         ITokenOptimizationService tokenOptimization,
         ILogger<SprintReportController> logger)
     {
-        _csvService = csvService;
+        _orchestrator = orchestrator;
         _insightService = insightService;
         _presentationService = presentationService;
         _openAIService = openAIService;
@@ -63,74 +64,56 @@ public class SprintReportController : ControllerBase
         [FromForm] GenerateSprintReportRequest request,
         CancellationToken cancellationToken = default)
     {
+        var validationResult = ValidateGenerateRequest(
+            request.CsvFile,
+            request.OutputFormat,
+            request.Template);
+        if (validationResult is not null)
+        {
+            return validationResult;
+        }
+
         try
         {
-            // Validate input
-            var validationResult = ValidateGenerateRequest(
-                request.CsvFile,
-                request.OutputFormat,
-                request.Template);
-            if (validationResult != null) return validationResult;
+            _logger.LogInformation(
+                "Starting orchestrated sprint report workflow for {FileName} ({Size} bytes)",
+                request.CsvFile.FileName,
+                request.CsvFile.Length);
 
-            _logger.LogInformation("Processing sprint report generation for file: {FileName} ({Size} bytes), Format: {Format}, Template: {Template}", 
-                request.CsvFile.FileName, request.CsvFile.Length, request.OutputFormat, request.Template);
+            var outputFormat = request.OutputFormat.Equals(
+                "powerpoint",
+                StringComparison.OrdinalIgnoreCase)
+                    ? PresentationFormat.PowerPoint
+                    : PresentationFormat.HTML;
 
-            // Parse CSV data
-            List<SprintTask> tasks;
-            using (var stream = request.CsvFile.OpenReadStream())
+            var options = new SprintReportGenerationOptions(
+                request.SprintName,
+                request.Template,
+                request.CompanyName,
+                outputFormat);
+
+            await using var stream = request.CsvFile.OpenReadStream();
+            var result = await _orchestrator.GenerateAsync(stream, options, cancellationToken);
+            var artifact = result.Presentation;
+            var aiResponse = result.Analysis.AIResponse;
+
+            _logger.LogInformation(
+                "Orchestrated workflow generated {FileName}. AI cost: ${Cost:F4}, tokens: {Tokens}, cached: {FromCache}",
+                artifact.FileName,
+                aiResponse.TokenUsage.EstimatedCost,
+                aiResponse.TokenUsage.TotalTokens,
+                aiResponse.FromCache);
+
+            return File(artifact.Content, artifact.ContentType, artifact.FileName);
+        }
+        catch (InvalidDataException ex)
+        {
+            _logger.LogWarning(ex, "CSV validation failed for {FileName}", request.CsvFile.FileName);
+            return BadRequest(new
             {
-                tasks = await _csvService.ParseAsync(stream);
-            }
-
-            if (tasks.Count == 0)
-            {
-                return BadRequest(new { error = "No valid tasks found in CSV file. Please check the format.", 
-                                       helpUrl = "/api/sprintreport/csv-format" });
-            }
-
-            // Generate metrics and insights
-            var metrics = _csvService.ComputeMetrics(tasks, request.SprintName);
-            var aiResponse = await _insightService.GenerateEnhancedInsightsAsync(metrics, cancellationToken);
-            var insights = aiResponse.Insights;
-
-            // Generate presentation based on format
-            byte[] presentationBytes;
-            string contentType;
-            string fileExtension;
-
-            if (request.OutputFormat.Equals("powerpoint", StringComparison.OrdinalIgnoreCase))
-            {
-                var presentationOptions = new PresentationOptions
-                {
-                    Template = request.Template,
-                    CompanyName = request.CompanyName ?? string.Empty,
-                    OutputFormat = PresentationFormat.PowerPoint,
-                    IncludeCharts = true,
-                    IncludeDetailedMetrics = true,
-                    IncludeTeamBreakdown = tasks.Count <= 100, // Skip for very large datasets
-                    IncludeRecommendations = true
-                };
-
-                presentationBytes = _presentationService.BuildPowerPointPresentation(metrics, insights, presentationOptions);
-                contentType = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-                fileExtension = "pptx";
-            }
-            else
-            {
-                presentationBytes = _presentationService.BuildPresentation(metrics, insights);
-                contentType = "text/html";
-                fileExtension = "html";
-            }
-
-            var fileName = $"Sprint_Report_{SanitizeFileName(metrics.SprintName)}_{DateTime.Now:yyyyMMdd_HHmmss}.{fileExtension}";
-            
-            // Log success with AI metadata
-            _logger.LogInformation("Successfully generated {Format} sprint report for {TaskCount} tasks. " +
-                                 "AI Cost: ${Cost:F4}, Tokens: {Tokens}, From Cache: {FromCache}, Optimizations: {OptCount}",
-                request.OutputFormat, tasks.Count, aiResponse.TokenUsage.EstimatedCost, aiResponse.TokenUsage.TotalTokens,
-                aiResponse.FromCache, aiResponse.OptimizationSuggestions.Count);
-
-            return File(presentationBytes, contentType, fileName);
+                error = ex.Message,
+                helpUrl = "/api/sprintreport/csv-format"
+            });
         }
         catch (OperationCanceledException)
         {
@@ -140,7 +123,8 @@ public class SprintReportController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error generating sprint report");
-            return StatusCode(500, new { 
+            return StatusCode(500, new
+            {
                 error = "An error occurred while generating the report. Please try again.",
                 supportInfo = "Check the CSV format requirements at /api/sprintreport/csv-format"
             });
@@ -176,20 +160,14 @@ public class SprintReportController : ControllerBase
 
             _logger.LogInformation("Processing sprint data preview for file: {FileName}", request.CsvFile.FileName);
 
-            List<SprintTask> tasks;
-            using (var stream = request.CsvFile.OpenReadStream())
-            {
-                tasks = await _csvService.ParseAsync(stream);
-            }
-
-            if (tasks.Count == 0)
-            {
-                return BadRequest(new { error = "No valid tasks found in CSV file.", 
-                                       helpUrl = "/api/sprintreport/csv-format" });
-            }
-
-            var metrics = _csvService.ComputeMetrics(tasks, request.SprintName);
-            var aiResponse = await _insightService.GenerateEnhancedInsightsAsync(metrics, cancellationToken);
+            await using var stream = request.CsvFile.OpenReadStream();
+            var analysis = await _orchestrator.AnalyzeAsync(
+                stream,
+                request.SprintName,
+                cancellationToken);
+            var tasks = analysis.Data.Tasks;
+            var metrics = analysis.Data.Metrics;
+            var aiResponse = analysis.AIResponse;
             var insights = aiResponse.Insights;
 
             object? optimizationAnalysis = null;
@@ -295,6 +273,20 @@ public class SprintReportController : ControllerBase
                 metrics.SprintName, tasks.Count, aiResponse.TokenUsage.EstimatedCost, request.IncludeOptimization);
 
             return Ok(preview);
+        }
+        catch (InvalidDataException ex)
+        {
+            _logger.LogWarning(ex, "CSV validation failed during preview");
+            return BadRequest(new
+            {
+                error = ex.Message,
+                helpUrl = "/api/sprintreport/csv-format"
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("Sprint data preview was cancelled");
+            return StatusCode(499, new { error = "Request was cancelled" });
         }
         catch (Exception ex)
         {
@@ -901,13 +893,6 @@ public class SprintReportController : ControllerBase
         }
 
         return null;
-    }
-
-    private static string SanitizeFileName(string fileName)
-    {
-        var invalidChars = Path.GetInvalidFileNameChars();
-        var sanitized = new string(fileName.Where(c => !invalidChars.Contains(c)).ToArray());
-        return string.IsNullOrWhiteSpace(sanitized) ? "Sprint_Report" : sanitized;
     }
 
     private static string CalculateOptimizationScore(TokenUsageSummary usage)
