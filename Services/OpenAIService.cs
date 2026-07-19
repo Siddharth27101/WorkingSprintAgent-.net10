@@ -81,15 +81,17 @@ public class OpenAIService : IOpenAIService
                 MaxPromptLength = _config.MaxTokens / 2
             });
 
-            // Generate cache key from optimized data for better cache hits
-            var cacheKey = GenerateCacheKey(optimizedData);
-            
-            // Check cache first to save costs
+            // Cache only exact AI requests. The previous key omitted sprint identity,
+            // blocker details, and team-member values, which could return stale insights
+            // for a newly uploaded CSV with similar aggregate metrics.
+            var cacheKey = GenerateCacheKey(metrics, optimizedPrompt);
+
+            // Check cache first to save costs. Return a copy so request-specific cache
+            // metadata never mutates the shared cached response.
             if (_config.EnableCaching && _cache.TryGetValue(cacheKey, out AIInsightsResponse? cachedResponse))
             {
                 _logger.LogInformation("Returning cached insights for sprint: {SprintName}", metrics.SprintName);
-                cachedResponse!.FromCache = true;
-                return cachedResponse;
+                return CopyAsCacheHit(cachedResponse!);
             }
 
             // Estimate costs before making the call
@@ -472,14 +474,50 @@ Guidelines:
         return inputCost + outputCost;
     }
 
-    private string GenerateCacheKey(OptimizedSprintData optimizedData)
+    private string GenerateCacheKey(SprintMetrics metrics, string optimizedPrompt)
     {
-        var keyData = JsonSerializer.Serialize(optimizedData.CoreMetrics) + 
-                     JsonSerializer.Serialize(optimizedData.StatusSummary) +
-                     optimizedData.TeamSummary.Count;
-        using var md5 = MD5.Create();
-        var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(keyData));
-        return Convert.ToHexString(hash);
+        const string cacheSchemaVersion = "sprint-insights-v2";
+        var keyData = string.Join('\n',
+            cacheSchemaVersion,
+            _config.Model,
+            _config.MaxTokens.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            _config.Temperature.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            GetSystemPrompt(),
+            optimizedPrompt,
+            JsonSerializer.Serialize(metrics));
+
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(keyData));
+        return $"OpenAIInsights:{Convert.ToHexString(hash)}";
+    }
+
+    private static AIInsightsResponse CopyAsCacheHit(AIInsightsResponse cachedResponse)
+    {
+        return new AIInsightsResponse
+        {
+            Insights = new SprintInsights
+            {
+                ExecutiveSummary = cachedResponse.Insights.ExecutiveSummary,
+                KeyHighlights = new List<string>(cachedResponse.Insights.KeyHighlights),
+                RisksAndBlockers = new List<string>(cachedResponse.Insights.RisksAndBlockers),
+                Recommendations = new List<string>(cachedResponse.Insights.Recommendations),
+                TeamPerformanceNarrative = cachedResponse.Insights.TeamPerformanceNarrative,
+                NextSprintFocus = cachedResponse.Insights.NextSprintFocus
+            },
+            TokenUsage = new TokenUsageStats
+            {
+                Timestamp = cachedResponse.TokenUsage.Timestamp,
+                RequestType = cachedResponse.TokenUsage.RequestType,
+                InputTokens = cachedResponse.TokenUsage.InputTokens,
+                OutputTokens = cachedResponse.TokenUsage.OutputTokens,
+                TotalTokens = cachedResponse.TokenUsage.TotalTokens,
+                EstimatedCost = cachedResponse.TokenUsage.EstimatedCost,
+                Model = cachedResponse.TokenUsage.Model,
+                ResponseTime = cachedResponse.TokenUsage.ResponseTime,
+                CacheHit = true
+            },
+            OptimizationSuggestions = new List<string>(cachedResponse.OptimizationSuggestions),
+            FromCache = true
+        };
     }
 
     private AIInsightsResponse GenerateFallbackInsights(SprintMetrics metrics)
