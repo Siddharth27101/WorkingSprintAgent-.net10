@@ -91,7 +91,7 @@ public class OpenAIService : IOpenAIService
             if (_config.EnableCaching && _cache.TryGetValue(cacheKey, out AIInsightsResponse? cachedResponse))
             {
                 _logger.LogInformation("Returning cached insights for sprint: {SprintName}", metrics.SprintName);
-                return CopyAsCacheHit(cachedResponse!);
+                return CopyResponse(cachedResponse!, fromCache: true, cacheHit: true);
             }
 
             // Estimate costs before making the call
@@ -182,7 +182,10 @@ public class OpenAIService : IOpenAIService
             // Cache successful response
             if (_config.EnableCaching)
             {
-                _cache.Set(cacheKey, response, TimeSpan.FromMinutes(_config.CacheExpirationMinutes));
+                _cache.Set(
+                    cacheKey,
+                    CopyResponse(response, fromCache: false, cacheHit: false),
+                    TimeSpan.FromMinutes(_config.CacheExpirationMinutes));
                 _logger.LogInformation("Cached insights for sprint: {SprintName}", metrics.SprintName);
             }
 
@@ -490,33 +493,36 @@ Guidelines:
         return $"OpenAIInsights:{Convert.ToHexString(hash)}";
     }
 
-    private static AIInsightsResponse CopyAsCacheHit(AIInsightsResponse cachedResponse)
+    private static AIInsightsResponse CopyResponse(
+        AIInsightsResponse source,
+        bool fromCache,
+        bool cacheHit)
     {
         return new AIInsightsResponse
         {
             Insights = new SprintInsights
             {
-                ExecutiveSummary = cachedResponse.Insights.ExecutiveSummary,
-                KeyHighlights = new List<string>(cachedResponse.Insights.KeyHighlights),
-                RisksAndBlockers = new List<string>(cachedResponse.Insights.RisksAndBlockers),
-                Recommendations = new List<string>(cachedResponse.Insights.Recommendations),
-                TeamPerformanceNarrative = cachedResponse.Insights.TeamPerformanceNarrative,
-                NextSprintFocus = cachedResponse.Insights.NextSprintFocus
+                ExecutiveSummary = source.Insights.ExecutiveSummary,
+                KeyHighlights = new List<string>(source.Insights.KeyHighlights),
+                RisksAndBlockers = new List<string>(source.Insights.RisksAndBlockers),
+                Recommendations = new List<string>(source.Insights.Recommendations),
+                TeamPerformanceNarrative = source.Insights.TeamPerformanceNarrative,
+                NextSprintFocus = source.Insights.NextSprintFocus
             },
             TokenUsage = new TokenUsageStats
             {
-                Timestamp = cachedResponse.TokenUsage.Timestamp,
-                RequestType = cachedResponse.TokenUsage.RequestType,
-                InputTokens = cachedResponse.TokenUsage.InputTokens,
-                OutputTokens = cachedResponse.TokenUsage.OutputTokens,
-                TotalTokens = cachedResponse.TokenUsage.TotalTokens,
-                EstimatedCost = cachedResponse.TokenUsage.EstimatedCost,
-                Model = cachedResponse.TokenUsage.Model,
-                ResponseTime = cachedResponse.TokenUsage.ResponseTime,
-                CacheHit = true
+                Timestamp = source.TokenUsage.Timestamp,
+                RequestType = source.TokenUsage.RequestType,
+                InputTokens = source.TokenUsage.InputTokens,
+                OutputTokens = source.TokenUsage.OutputTokens,
+                TotalTokens = source.TokenUsage.TotalTokens,
+                EstimatedCost = source.TokenUsage.EstimatedCost,
+                Model = source.TokenUsage.Model,
+                ResponseTime = source.TokenUsage.ResponseTime,
+                CacheHit = cacheHit
             },
-            OptimizationSuggestions = new List<string>(cachedResponse.OptimizationSuggestions),
-            FromCache = true
+            OptimizationSuggestions = new List<string>(source.OptimizationSuggestions),
+            FromCache = fromCache
         };
     }
 
