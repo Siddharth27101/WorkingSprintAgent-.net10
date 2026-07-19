@@ -235,7 +235,29 @@ public class PowerPointPresentationService
         };
     }
 
-    private static string EscapeXml(string value) => SecurityElement.Escape(value) ?? string.Empty;
+    private static string EscapeXml(string value)
+    {
+        var sanitized = new StringBuilder(value.Length);
+        foreach (var rune in value.EnumerateRunes())
+        {
+            // Escaping XML metacharacters does not remove control characters that
+            // XML 1.0 forbids. Ignore those characters while preserving Unicode text.
+            if (IsXml10Character(rune.Value))
+            {
+                sanitized.Append(rune.ToString());
+            }
+        }
+
+        return SecurityElement.Escape(sanitized.ToString()) ?? string.Empty;
+    }
+
+    private static bool IsXml10Character(int value)
+    {
+        return value is 0x9 or 0xA or 0xD
+            || value is >= 0x20 and <= 0xD7FF
+            || value is >= 0xE000 and <= 0xFFFD
+            || value is >= 0x10000 and <= 0x10FFFF;
+    }
 
     private sealed record SlideContent(string Title, string Body);
     private sealed record PresentationTheme(string BackgroundColor, string TitleColor, string TextColor);
@@ -282,7 +304,7 @@ public class PowerPointPresentationService
             <p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>
           </p:spTree></p:cSld>
           <p:clrMap accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" bg1="lt1" bg2="lt2" folHlink="folHlink" hlink="hlink" tx1="dk1" tx2="dk2"/>
-          <p:sldLayoutIdLst><p:sldLayoutId id="1" r:id="rId1"/></p:sldLayoutIdLst>
+          <p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst>
           <p:txStyles><p:titleStyle/><p:bodyStyle/><p:otherStyle/></p:txStyles>
         </p:sldMaster>
         """;
