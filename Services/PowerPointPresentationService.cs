@@ -77,11 +77,10 @@ public class PowerPointPresentationService
         var proxyNote = metrics.UsesWorkItemProxy
             ? "Story points were not present, so work-item counts are used as a clearly labelled proxy."
             : "Values use story points supplied in the source data.";
-        var inProgress = metrics.TasksByStatus
-            .Where(item => item.Key.Contains("progress", StringComparison.OrdinalIgnoreCase)
-                || item.Key.Contains("review", StringComparison.OrdinalIgnoreCase))
-            .Sum(item => item.Value);
-        var remaining = Math.Max(0, metrics.TotalTasks - metrics.CompletedTasks - inProgress);
+        var inProgress = metrics.InProgressTasks;
+        var remaining = metrics.NotStartedTasks;
+        var healthCards = BuildHealthCards(metrics);
+        var healthExplanation = BuildHealthExplanation(metrics);
         var velocityPoints = metrics.VelocityTrend.TakeLast(8).ToList();
         var teamPoints = metrics.WorkloadByAssignee.Take(7)
             .Select(member => new MetricPoint
@@ -102,7 +101,7 @@ public class PowerPointPresentationService
         [
             new SlideContent(
                 "Cover",
-                $"{metrics.SprintName} - Sprint Report\nGenerated on {DateTime.Now:MMMM dd, yyyy}{company}\n14-slide sprint intelligence briefing",
+                $"{metrics.SprintName} - Sprint Report\nGenerated on {DateTime.Now:MMMM dd, yyyy}{company}\n15-slide sprint intelligence briefing",
                 SlideKind.Cover),
             new SlideContent(
                 "Executive Summary",
@@ -123,12 +122,22 @@ public class PowerPointPresentationService
                     new("Open risks", metrics.OpenRiskCount.ToString())
                 ]),
             new SlideContent(
+                "Sprint Health Breakdown",
+                healthExplanation,
+                SlideKind.Dashboard,
+                Explanation: "Each card shows its point contribution to the sprint health score; higher is better.",
+                Cards: healthCards),
+            new SlideContent(
                 "Velocity Trend",
                 string.Empty,
                 SlideKind.BarChart,
                 new ChartContent(velocityPoints, "Completed", "Planned", "3279B7", "B8C7D9"),
                 $"Completed versus planned {metrics.WorkUnitLabel.ToLowerInvariant()} by sprint. " +
-                $"The latest completion is {(velocityPoints.LastOrDefault()?.Value ?? 0):F0}; compare the blue bar with the grey plan to spot delivery variance. {proxyNote}"),
+                $"The latest completion is {(velocityPoints.LastOrDefault()?.Value ?? 0):F0}; compare the blue bar with the grey plan to spot delivery variance. " +
+                (metrics.DistinctSprintCount < 3
+                    ? $"Only {Math.Max(1, metrics.DistinctSprintCount)} sprint(s) of history are present, so the trend is indicative only — supply 5-8 sprints of SprintSummary data to reveal whether velocity is improving or declining. "
+                    : string.Empty) +
+                proxyNote),
             new SlideContent(
                 "Burndown Chart",
                 string.Empty,
@@ -157,10 +166,11 @@ public class PowerPointPresentationService
                 $"Bars rank up to seven assignees by completed issues against assigned issues. {insights.TeamPerformanceNarrative}"),
             new SlideContent(
                 "Quality Metrics",
-                $"Build stability: {(metrics.HasCiCdData ? $"{metrics.BuildSuccessRatePercent:F1}% success" : "not supplied")}\n" +
+                $"Defect density: {metrics.DefectDensityPercent:F1}% of issues are bugs ({metrics.BugCount} of {metrics.TotalTasks}); ~{metrics.BugsPerContributor:F1} bugs per contributor.\n" +
+                $"Build stability: {(metrics.HasCiCdData ? $"{metrics.BuildSuccessRatePercent:F1}% success" : "not supplied")}  |  " +
                 $"Deployments: {(metrics.HasCiCdData ? metrics.DeploymentCount.ToString() : "not supplied")}",
                 SlideKind.Dashboard,
-                Explanation: "Quality signals combine bug severity, code coverage, technical debt, Sonar findings, and CI/CD stability. Missing workbook measures are shown as N/A rather than invented.",
+                Explanation: "Quality signals combine bug severity, defect density, code coverage, technical debt, Sonar findings, and CI/CD stability. Bug leakage, reopened bugs, and defect trend-over-time need issue history that a single-sprint export does not contain; missing measures are shown as N/A rather than invented.",
                 Cards:
                 [
                     new("Critical bugs", metrics.HasQualityData ? metrics.CriticalBugs.ToString() : "N/A"),
@@ -193,7 +203,9 @@ public class PowerPointPresentationService
                 "Challenges",
                 $"Delivery challenges:\n{FormatItems(insights.RisksAndBlockers, 6)}\n\n" +
                 $"Operational signals: {metrics.BlockedTasks} blocked, {metrics.HighRiskCount} high risk, " +
-                $"{metrics.CriticalBugs} critical bugs, and {Math.Max(0, metrics.TotalTasks - metrics.CompletedTasks)} incomplete issues."),
+                $"{metrics.CriticalBugs} critical bugs, {metrics.CarryOverTasks} carried over " +
+                $"({metrics.NotStartedTasks} never started, {metrics.InProgressTasks} in progress)" +
+                (metrics.HasCycleTimeData ? $", average cycle time {metrics.AverageCycleTimeDays:F1} day(s)" : string.Empty) + "."),
             new SlideContent(
                 "AI Recommendations",
                 FormatItems(insights.Recommendations, 7)),
@@ -202,13 +214,54 @@ public class PowerPointPresentationService
                 $"Primary focus: {insights.NextSprintFocus}\n\n" +
                 $"• Resolve the {metrics.BlockedTasks} blocked item(s) before accepting new work.\n" +
                 $"• Prioritize {metrics.HighRiskCount} high-risk item(s) and {metrics.CriticalBugs} critical bug(s).\n" +
-                $"• Plan from demonstrated completion of {metrics.CompletedWork:F0} {metrics.WorkUnitLabel.ToLowerInvariant()}.\n" +
+                $"• Right-size the commitment to ~{Math.Max(1, (int)Math.Round(metrics.CompletedTasks * 1.1))} issues based on demonstrated completion of {metrics.CompletedWork:F0} {metrics.WorkUnitLabel.ToLowerInvariant()}.\n" +
+                $"• Triage the {metrics.CarryOverTasks} carried-over item(s), including {metrics.NotStartedTasks} that never started.\n" +
                 "• Reconfirm capacity, owners, due dates, and mitigation status at sprint kickoff.")
         ];
     }
 
+    private static List<MetricCard> BuildHealthCards(SprintMetrics metrics)
+    {
+        var cards = new List<MetricCard>();
+        var components = metrics.HealthBreakdown;
+        if (components.Count == 0)
+        {
+            cards.Add(new MetricCard("Overall health", $"{metrics.SprintHealthScore:F0}/100"));
+            return cards;
+        }
+
+        foreach (var component in components.Take(8))
+        {
+            var value = component.IsTotal
+                ? $"{component.Points:F0}/100"
+                : component.Points >= 0
+                    ? $"+{component.Points:F0}"
+                    : $"{component.Points:F0}";
+            cards.Add(new MetricCard(component.Label, value));
+        }
+
+        return cards;
+    }
+
+    private static string BuildHealthExplanation(SprintMetrics metrics)
+    {
+        var terms = metrics.HealthBreakdown
+            .Where(component => !component.IsTotal)
+            .Select(component =>
+            {
+                var sign = component.Points >= 0 ? $"+{component.Points:F0}" : $"{component.Points:F0}";
+                return $"{component.Label} {sign}";
+            })
+            .ToList();
+
+        return terms.Count > 0
+            ? $"How the score is calculated: {string.Join("  ", terms)}  =  {metrics.SprintHealthScore:F0}/100"
+            : $"Overall health: {metrics.SprintHealthScore:F0}/100";
+    }
+
     private static string FormatItems(IEnumerable<string> items, int maximum)
     {
+
         var materialized = items
             .Where(item => !string.IsNullOrWhiteSpace(item))
             .Select(item => item.Length > 220 ? item[..217] + "..." : item)
