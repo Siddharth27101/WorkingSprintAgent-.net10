@@ -109,7 +109,7 @@ public class PowerPointPresentationService
                 $"{insights.ExecutiveSummary}\n\nSprint health: {metrics.SprintHealthScore:F0}/100 | Completion: {metrics.CompletionRatePercent:F1}%\n\nKey highlights:\n{FormatItems(insights.KeyHighlights, 5)}"),
             new SlideContent(
                 "Sprint Metrics Dashboard",
-                $"Snapshot: {metrics.ReportSnapshotDate?.ToString("MMM dd, yyyy") ?? "latest uploaded data"}\n{proxyNote}",
+                $"Data as of {metrics.ReportSnapshotDate?.ToString("MMM dd, yyyy") ?? "latest uploaded data"} \u00b7 Generated {DateTime.Now:MMM dd, yyyy}\n{proxyNote}",
                 SlideKind.Dashboard,
                 Cards:
                 [
