@@ -63,14 +63,14 @@ public class OpenAIService : IOpenAIService
             if (_openAIClient is null)
             {
                 _logger.LogInformation("OpenAI is not configured. Using fallback insights for sprint: {SprintName}", metrics.SprintName);
-                return GenerateFallbackInsights(metrics);
+                return GenerateFallbackInsights(metrics, "OpenAI API key not configured");
             }
 
             // Check daily budget before making API call
             if (await IsDailyBudgetExceededAsync())
             {
                 _logger.LogWarning("Daily token budget exceeded. Falling back to optimized generation.");
-                return GenerateFallbackInsights(metrics);
+                return GenerateFallbackInsights(metrics, $"Daily token budget of {_config.MaxDailyTokens:N0} tokens exceeded");
             }
 
             // Use token optimization service for better cost efficiency
@@ -206,7 +206,9 @@ public class OpenAIService : IOpenAIService
             _logger.LogError(ex, "Error generating AI insights for sprint: {SprintName}", metrics.SprintName);
             
             // Fallback to basic insights on an OpenAI or parsing failure.
-            return GenerateFallbackInsights(metrics);
+            // Surface the real reason so the caller can diagnose (e.g. 401 invalid key,
+            // 429 insufficient quota/billing, network/DNS failure, model access).
+            return GenerateFallbackInsights(metrics, $"{ex.GetType().Name}: {ex.Message}");
         }
     }
 
@@ -562,13 +564,22 @@ Guidelines:
         };
     }
 
-    private AIInsightsResponse GenerateFallbackInsights(SprintMetrics metrics)
+    private AIInsightsResponse GenerateFallbackInsights(SprintMetrics metrics, string? reason = null)
     {
-        _logger.LogInformation("Generating fallback insights for sprint: {SprintName}", metrics.SprintName);
+        _logger.LogWarning(
+            "Generating fallback insights for sprint: {SprintName}. Reason: {Reason}",
+            metrics.SprintName,
+            string.IsNullOrWhiteSpace(reason) ? "unspecified" : reason);
 
         // Use the existing mock service logic as fallback
         var mockService = new MockInsightGenerationService(new NullLogger<MockInsightGenerationService>());
         var insights = mockService.GenerateInsightsAsync(metrics).Result;
+
+        var suggestions = new List<string> { "AI service unavailable - using fallback insights generation" };
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            suggestions.Add($"Fallback reason: {reason}");
+        }
 
         return new AIInsightsResponse
         {
@@ -580,7 +591,7 @@ Guidelines:
                 EstimatedCost = 0,
                 Model = "Fallback"
             },
-            OptimizationSuggestions = new List<string> { "AI service unavailable - using fallback insights generation" },
+            OptimizationSuggestions = suggestions,
             FromCache = false
         };
     }
