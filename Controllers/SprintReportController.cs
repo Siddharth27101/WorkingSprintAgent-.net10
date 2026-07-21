@@ -229,19 +229,45 @@ public class SprintReportController : ControllerBase
                     metrics.ScopeChangePercent,
                     metrics.BugCount,
                     metrics.HighRiskCount,
+                    // Flow / carry-over signals
+                    metrics.InProgressTasks,
+                    metrics.NotStartedTasks,
+                    metrics.CarryOverTasks,
+                    // Contributor concentration
+                    metrics.TopContributor,
+                    metrics.TopContributorCompleted,
+                    metrics.TopContributorSharePercent,
+                    // Quality depth
+                    metrics.DefectDensityPercent,
+                    metrics.BugsPerContributor,
+                    metrics.CriticalBugs,
+                    metrics.MajorBugs,
+                    metrics.MinorBugs,
+                    // Delivery cadence / flow
+                    metrics.DistinctSprintCount,
+                    metrics.AverageCycleTimeDays,
+                    metrics.HasCycleTimeData,
                     metrics.TasksByStatus,
                     metrics.TasksByType,
                     metrics.TasksByPriority,
                     TeamMembers = metrics.WorkloadByAssignee.Count,
                     BlockedItems = metrics.BlockedTaskTitles.Count
                 },
-                
+
+                SprintHealthBreakdown = metrics.HealthBreakdown.Select(component => new
+                {
+                    component.Label,
+                    component.Points,
+                    component.Detail,
+                    component.IsTotal
+                }),
+
                 Insights = new
                 {
                     insights.ExecutiveSummary,
                     KeyHighlights = insights.KeyHighlights.Take(5),
-                    RisksAndBlockers = insights.RisksAndBlockers.Take(3),
-                    Recommendations = insights.Recommendations.Take(4),
+                    RisksAndBlockers = insights.RisksAndBlockers.Take(5),
+                    Recommendations = insights.Recommendations.Take(6),
                     insights.TeamPerformanceNarrative,
                     insights.NextSprintFocus
                 },
