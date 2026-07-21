@@ -108,7 +108,8 @@ public class MockInsightGenerationService : IInsightGenerationService
             ? $" {metrics.BlockedTasks} critical blocker{(metrics.BlockedTasks > 1 ? "s require" : " requires")} immediate attention."
             : " No critical blockers identified.";
 
-        return $"{metrics.SprintName} achieved {performance} performance with {metrics.CompletionRatePercent}% task completion and {metrics.CompletedStoryPoints:F1} of {metrics.TotalStoryPoints:F1} story points delivered.{blockerNote}";
+        return $"{metrics.SprintName} achieved {performance} performance with {metrics.CompletionRatePercent:F1}% issue completion, " +
+               $"a sprint health score of {metrics.SprintHealthScore:F0}/100, and {metrics.CompletedWork:F1} of {metrics.PlannedWork:F1} {metrics.WorkUnitLabel.ToLowerInvariant()} delivered.{blockerNote}";
     }
 
     private static List<string> GenerateKeyHighlights(SprintMetrics metrics)
@@ -117,10 +118,10 @@ public class MockInsightGenerationService : IInsightGenerationService
 
         highlights.Add($"Completed {metrics.CompletedTasks} of {metrics.TotalTasks} planned tasks");
 
-        if (metrics.TotalStoryPoints > 0)
+        if (metrics.PlannedWork > 0)
         {
-            var pointsRate = (metrics.CompletedStoryPoints / metrics.TotalStoryPoints) * 100;
-            highlights.Add($"Delivered {metrics.CompletedStoryPoints:F1} story points ({pointsRate:F0}% of planned capacity)");
+            var deliveryRate = (metrics.CompletedWork / metrics.PlannedWork) * 100;
+            highlights.Add($"Delivered {metrics.CompletedWork:F1} of {metrics.PlannedWork:F1} {metrics.WorkUnitLabel.ToLowerInvariant()} ({deliveryRate:F0}%)");
         }
 
         if (metrics.WorkloadByAssignee.Any())
@@ -160,13 +161,23 @@ public class MockInsightGenerationService : IInsightGenerationService
             }
         }
 
-        if (metrics.TotalStoryPoints > 0)
+        if (metrics.PlannedWork > 0)
         {
-            var pointsRate = (metrics.CompletedStoryPoints / metrics.TotalStoryPoints) * 100;
-            if (pointsRate < 60)
+            var deliveryRate = (metrics.CompletedWork / metrics.PlannedWork) * 100;
+            if (deliveryRate < 60)
             {
-                risks.Add("Story point delivery significantly behind planned capacity");
+                risks.Add($"{metrics.WorkUnitLabel} delivery is significantly behind planned capacity");
             }
+        }
+
+        if (metrics.HighRiskCount > 0)
+        {
+            risks.Add($"{metrics.HighRiskCount} high-impact sprint risk{(metrics.HighRiskCount > 1 ? "s remain" : " remains")} open");
+        }
+
+        if (metrics.CriticalBugs > 0)
+        {
+            risks.Add($"{metrics.CriticalBugs} critical bug{(metrics.CriticalBugs > 1 ? "s require" : " requires")} immediate quality attention");
         }
 
         return risks.Any() ? risks : new List<string> { "No significant risks identified for this sprint" };
@@ -201,7 +212,22 @@ public class MockInsightGenerationService : IInsightGenerationService
             recommendations.Add("Maintain current sprint velocity and team collaboration practices");
         }
 
-        return recommendations.Take(3).ToList();
+        if (metrics.ScopeChangePercent > 10)
+        {
+            recommendations.Add("Add a sprint scope-change checkpoint and require explicit trade-offs for new work");
+        }
+
+        if (metrics.CriticalBugs > 0 || metrics.HighRiskCount > 0)
+        {
+            recommendations.Add("Assign named owners and due dates to critical defects and high-impact risks");
+        }
+
+        if (metrics.BuildFailureCount > 0)
+        {
+            recommendations.Add("Review failed builds and strengthen CI quality gates before the next deployment");
+        }
+
+        return recommendations.Take(5).ToList();
     }
 
     private static string GenerateTeamPerformanceNarrative(SprintMetrics metrics)
@@ -213,11 +239,11 @@ public class MockInsightGenerationService : IInsightGenerationService
 
         var teamSize = metrics.WorkloadByAssignee.Count;
         var avgTasksPerPerson = metrics.TotalTasks / (double)teamSize;
-        var avgPointsPerPerson = metrics.TotalStoryPoints / teamSize;
+        var avgWorkPerPerson = teamSize == 0 ? 0 : metrics.PlannedWork / teamSize;
 
         var performance = metrics.CompletionRatePercent >= 80 ? "delivered strong results" : "faced some challenges";
         
-        return $"Team of {teamSize} members {performance} with an average of {avgTasksPerPerson:F1} tasks and {avgPointsPerPerson:F1} story points per person. " +
+        return $"Team of {teamSize} members {performance} with an average of {avgTasksPerPerson:F1} issues and {avgWorkPerPerson:F1} {metrics.WorkUnitLabel.ToLowerInvariant()} per person. " +
                $"Collaboration and task distribution patterns show {(avgTasksPerPerson > 4 ? "high engagement" : "balanced workload")} across the sprint.";
     }
 

@@ -3,7 +3,7 @@ using WorkingSprintAgent.Models;
 namespace WorkingSprintAgent.Services.Agents;
 
 /// <summary>
-/// Validates and transforms an uploaded CSV stream into sprint tasks and metrics.
+/// Validates and transforms an uploaded CSV or Excel stream into sprint tasks and metrics.
 /// </summary>
 public interface IFileUploadAgent
 {
