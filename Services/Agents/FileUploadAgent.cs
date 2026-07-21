@@ -3,7 +3,7 @@ using WorkingSprintAgent.Models;
 namespace WorkingSprintAgent.Services.Agents;
 
 /// <summary>
-/// File-upload workflow stage backed by the CSV parsing service.
+/// File-upload workflow stage backed by the sprint data parsing service.
 /// </summary>
 public sealed class FileUploadAgent : IFileUploadAgent
 {
@@ -26,15 +26,14 @@ public sealed class FileUploadAgent : IFileUploadAgent
         ArgumentNullException.ThrowIfNull(csvStream);
         cancellationToken.ThrowIfCancellationRequested();
 
-        _logger.LogInformation("File Upload Agent started CSV processing");
-        var tasks = await _csvService.ParseAsync(csvStream, cancellationToken);
-        var metrics = _csvService.ComputeMetrics(tasks, sprintName);
+        _logger.LogInformation("File Upload Agent started sprint data processing");
+        var dataSet = await _csvService.ParseDataSetAsync(csvStream, sprintName, cancellationToken);
 
         _logger.LogInformation(
             "File Upload Agent completed with {TaskCount} tasks for sprint '{SprintName}'",
-            tasks.Count,
-            metrics.SprintName);
+            dataSet.Tasks.Count,
+            dataSet.Metrics.SprintName);
 
-        return new SprintDataSet(tasks, metrics);
+        return dataSet;
     }
 }

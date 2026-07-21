@@ -1,6 +1,6 @@
 # Working Sprint Agent (.NET 10)
 
-An ASP.NET Core .NET 10 API that accepts sprint data as a CSV upload, calculates sprint metrics, asks OpenAI for a concise summary, and returns a stakeholder-ready PowerPoint presentation. Swagger UI is included for an easy browser demonstration.
+An ASP.NET Core .NET 10 API that accepts Jira sprint data as CSV or a multi-sheet Excel workbook, calculates delivery/quality/risk metrics, asks OpenAI for concise insights, and returns a stakeholder-ready 14-slide PowerPoint presentation with charts and graph explanations.
 
 ## Requirements
 
@@ -54,7 +54,7 @@ dotnet run --launch-profile "WorkingSprintAgent (HTTP)"
 
 Swagger is then available at `http://localhost:5080/swagger`.
 
-## Demonstrate CSV to PowerPoint in Swagger
+## Demonstrate sprint data to PowerPoint in Swagger
 
 1. Open `GET /api/SprintReport/sample-csv`, select **Try it out**, and download the sample CSV.
 2. Open `POST /api/SprintReport/preview`, select **Try it out**, upload the CSV, and execute it. This displays parsed metrics, the generated summary, and AI token metadata.
@@ -65,12 +65,11 @@ Swagger is then available at `http://localhost:5080/swagger`.
 The complete processing flow is:
 
 ```text
-CSV upload
-  -> parse and validate tasks
-  -> calculate sprint metrics
-  -> optimize the prompt
-  -> request structured OpenAI insights
-  -> create an 8-slide PowerPoint
+CSV or XLSX upload
+  -> parse Issues and optional workbook analytics sheets
+  -> calculate delivery, quality, capacity, scope, and risk metrics
+  -> request structured OpenAI insights (or deterministic fallback)
+  -> create an exact 14-slide PowerPoint with charts and graph explanations
   -> return the .pptx download
 ```
 
@@ -92,7 +91,7 @@ Optional columns:
 - `StartDate`
 - `EndDate`
 
-Column names are case-insensitive and common aliases are accepted. `GET /api/SprintReport/csv-format` returns the complete format guide and sample data. Uploads must be `.csv` files no larger than 10 MB.
+Column names are case-insensitive and common aliases are accepted. Excel workbooks require an `Issues` sheet and can optionally include `SprintSummary`, `Burndown`, `Capacity`, `Quality`, `CI-CD`, and `Risks` sheets. `GET /api/SprintReport/csv-format` returns the complete format guide and sample data. Uploads must be `.csv` or `.xlsx` files no larger than 25 MB; up to 20,000 issues are supported.
 
 ## Main endpoints
 

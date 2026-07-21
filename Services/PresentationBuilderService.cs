@@ -60,17 +60,31 @@ public class PresentationBuilderService : IPresentationBuilderService
     {
         var slideTopics = new List<string>
         {
-            "Title Slide",
+            "Cover",
             "Executive Summary",
-            "Sprint Metrics Overview",
-            "Task Completion Analysis",
-            "Team Performance",
-            "Risks & Blockers",
-            "Recommendations",
-            "Next Sprint Focus"
+            "Sprint Metrics Dashboard",
+            "Velocity Trend",
+            "Burndown Chart",
+            "Story Completion",
+            "Team Productivity",
+            "Quality Metrics",
+            "Risk & Blockers",
+            "Scope Changes",
+            "Key Achievements",
+            "Challenges",
+            "AI Recommendations",
+            "Next Sprint Action Items"
         };
 
-        var chartTypes = new List<string>();
+        var chartTypes = new List<string>
+        {
+            "Planned vs completed velocity bars",
+            "Actual vs ideal burndown line graph",
+            "Story completion bars",
+            "Team productivity bars",
+            "Risk exposure bars",
+            "Cumulative scope line graph"
+        };
 
         return new PresentationSummary
         {

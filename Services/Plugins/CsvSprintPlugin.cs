@@ -7,7 +7,7 @@ using WorkingSprintAgent.Services.Orchestration;
 namespace WorkingSprintAgent.Services.Plugins;
 
 /// <summary>
-/// Exposes deterministic CSV parsing and metrics as safe Semantic Kernel functions.
+/// Exposes deterministic sprint-data parsing and metrics as safe Semantic Kernel functions.
 /// </summary>
 public sealed class CsvSprintPlugin
 {
@@ -24,7 +24,7 @@ public sealed class CsvSprintPlugin
     }
 
     [KernelFunction("load_sprint_data")]
-    [Description("Parses the uploaded CSV for a workflow and stores verified sprint tasks and metrics. Call once before analysis.")]
+    [Description("Parses the uploaded CSV or Excel workbook for a workflow and stores verified sprint tasks and metrics. Call once before analysis.")]
     public async Task<string> LoadSprintDataAsync(
         [Description("The current workflow identifier.")] string workflowId,
         CancellationToken cancellationToken = default)
@@ -33,9 +33,10 @@ public sealed class CsvSprintPlugin
         if (state.Data is null)
         {
             await using var stream = new MemoryStream(state.CsvContent, writable: false);
-            var tasks = await _csvService.ParseAsync(stream, cancellationToken);
-            var metrics = _csvService.ComputeMetrics(tasks, state.GenerationOptions.SprintName);
-            state.Data = new SprintDataSet(tasks, metrics);
+            state.Data = await _csvService.ParseDataSetAsync(
+                stream,
+                state.GenerationOptions.SprintName,
+                cancellationToken);
         }
 
         return SerializeMetrics(state.Data.Metrics);
@@ -70,7 +71,49 @@ public sealed class CsvSprintPlugin
             metrics.BlockedTasks,
             metrics.TotalStoryPoints,
             metrics.CompletedStoryPoints,
+            metrics.PlannedWork,
+            metrics.CompletedWork,
+            metrics.WorkUnitLabel,
+            metrics.UsesWorkItemProxy,
             metrics.CompletionRatePercent,
+            metrics.WorkCompletionRatePercent,
+            metrics.SprintHealthScore,
+            metrics.HasCapacityData,
+            metrics.CapacityUtilizationPercent,
+            metrics.HasScopeData,
+            metrics.ScopeChangePercent,
+            metrics.ScopeAddedItems,
+            Quality = new
+            {
+                metrics.BugCount,
+                metrics.CriticalBugs,
+                metrics.MajorBugs,
+                metrics.MinorBugs,
+                metrics.CodeCoveragePercent,
+                metrics.TechnicalDebtItems,
+                metrics.SonarIssues
+            },
+            Delivery = new
+            {
+                metrics.BuildSuccessCount,
+                metrics.BuildFailureCount,
+                metrics.BuildSuccessRatePercent,
+                metrics.DeploymentCount,
+                metrics.AverageDeploymentDurationMinutes
+            },
+            Risk = new
+            {
+                metrics.OpenRiskCount,
+                metrics.HighRiskCount,
+                Items = metrics.Risks.Take(10).Select(risk => new
+                {
+                    Name = Truncate(risk.Name),
+                    risk.Probability,
+                    risk.Impact,
+                    risk.MitigationStatus,
+                    risk.Score
+                })
+            },
             TasksByStatus = SummarizeCategories(metrics.TasksByStatus),
             TasksByType = SummarizeCategories(metrics.TasksByType),
             TasksByPriority = SummarizeCategories(metrics.TasksByPriority),

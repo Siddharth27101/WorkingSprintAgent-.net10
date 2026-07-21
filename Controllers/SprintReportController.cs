@@ -49,7 +49,7 @@ public class SprintReportController : ControllerBase
     /// <summary>
     /// Generate comprehensive sprint presentation with AI-powered insights
     /// </summary>
-    /// <param name="request">Multipart form containing the CSV file and presentation options</param>
+    /// <param name="request">Multipart form containing the CSV or Excel file and presentation options</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Professional presentation file ready for stakeholders</returns>
     /// <response code="200">Successfully generated presentation</response>
@@ -80,11 +80,7 @@ public class SprintReportController : ControllerBase
                 request.CsvFile.FileName,
                 request.CsvFile.Length);
 
-            var outputFormat = request.OutputFormat.Equals(
-                "powerpoint",
-                StringComparison.OrdinalIgnoreCase)
-                    ? PresentationFormat.PowerPoint
-                    : PresentationFormat.HTML;
+            const PresentationFormat outputFormat = PresentationFormat.PowerPoint;
 
             var options = new SprintReportGenerationOptions(
                 request.SprintName,
@@ -108,7 +104,7 @@ public class SprintReportController : ControllerBase
         }
         catch (InvalidDataException ex)
         {
-            _logger.LogWarning(ex, "CSV validation failed for {FileName}", request.CsvFile.FileName);
+            _logger.LogWarning(ex, "Sprint data validation failed for {FileName}", request.CsvFile.FileName);
             return BadRequest(new
             {
                 error = ex.Message,
@@ -134,7 +130,7 @@ public class SprintReportController : ControllerBase
             return StatusCode(500, new
             {
                 error = "An error occurred while generating the report. Please try again.",
-                supportInfo = "Check the CSV format requirements at /api/sprintreport/csv-format"
+                supportInfo = "Check the CSV and Excel format requirements at /api/sprintreport/csv-format"
             });
         }
     }
@@ -142,7 +138,7 @@ public class SprintReportController : ControllerBase
     /// <summary>
     /// Preview sprint data and get AI-powered insights without generating full presentation
     /// </summary>
-    /// <param name="request">Multipart form containing the CSV file and preview options</param>
+    /// <param name="request">Multipart form containing the CSV or Excel file and preview options</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Preview data with metrics, insights, and optimization recommendations</returns>
     /// <response code="200">Successfully analyzed sprint data</response>
@@ -160,10 +156,10 @@ public class SprintReportController : ControllerBase
     {
         try
         {
-            var csvValidationResult = ValidateCsvFile(request.CsvFile);
-            if (csvValidationResult != null)
+            var dataValidationResult = ValidateDataFile(request.CsvFile);
+            if (dataValidationResult != null)
             {
-                return csvValidationResult;
+                return dataValidationResult;
             }
 
             _logger.LogInformation("Processing sprint data preview for file: {FileName}", request.CsvFile.FileName);
@@ -223,7 +219,16 @@ public class SprintReportController : ControllerBase
                     metrics.BlockedTasks,
                     metrics.TotalStoryPoints,
                     metrics.CompletedStoryPoints,
+                    metrics.CompletedWork,
+                    metrics.PlannedWork,
+                    metrics.WorkUnitLabel,
                     metrics.CompletionRatePercent,
+                    metrics.WorkCompletionRatePercent,
+                    metrics.SprintHealthScore,
+                    metrics.CapacityUtilizationPercent,
+                    metrics.ScopeChangePercent,
+                    metrics.BugCount,
+                    metrics.HighRiskCount,
                     metrics.TasksByStatus,
                     metrics.TasksByType,
                     metrics.TasksByPriority,
@@ -258,9 +263,9 @@ public class SprintReportController : ControllerBase
                 PresentationOptions = new
                 {
                     AvailableTemplates = _presentationService.GetAvailableTemplates().Select(t => new { t.Id, t.Name, t.Description }),
-                    AvailableFormats = new[] { "powerpoint", "html" },
-                    EstimatedSlides = 8,
-                    EstimatedViewingTime = "12-16 minutes"
+                    AvailableFormats = new[] { "powerpoint" },
+                    EstimatedSlides = 14,
+                    EstimatedViewingTime = "18-24 minutes"
                 },
                 
                 SampleTasks = tasks.Take(5).Select(t => new
@@ -284,7 +289,7 @@ public class SprintReportController : ControllerBase
         }
         catch (InvalidDataException ex)
         {
-            _logger.LogWarning(ex, "CSV validation failed during preview");
+            _logger.LogWarning(ex, "Sprint data validation failed during preview");
             return BadRequest(new
             {
                 error = ex.Message,
@@ -338,7 +343,7 @@ public class SprintReportController : ControllerBase
     {
         var formatInfo = new
         {
-            Description = "Sprint data CSV format specification for AI-powered analysis",
+            Description = "Sprint CSV or Excel workbook format specification for AI-powered 14-slide analysis",
             RequiredColumns = new[]
             {
                 new { Name = "TaskId", Aliases = new[] { "ID", "Key", "IssueKey" }, Description = "Unique identifier for the task", Example = "PROJ-123" },
@@ -350,10 +355,21 @@ public class SprintReportController : ControllerBase
             {
                 new { Name = "Type", Aliases = new[] { "IssueType", "WorkItemType" }, Description = "Type of work item", Example = "Story, Bug, Task" },
                 new { Name = "Priority", Aliases = new string[0], Description = "Task priority level", Example = "High, Medium, Low" },
-                new { Name = "StoryPoints", Aliases = new[] { "Points", "Estimate" }, Description = "Effort estimation (numeric)", Example = "3, 5, 8" },
+                new { Name = "StoryPoints", Aliases = new[] { "Points", "Estimate", "Story point estimate", "Custom field (Story Points)" }, Description = "Effort estimation (numeric)", Example = "3, 5, 8" },
                 new { Name = "SprintName", Aliases = new[] { "Sprint" }, Description = "Sprint identifier", Example = "Sprint 2024-Q1" },
                 new { Name = "StartDate", Aliases = new[] { "Created" }, Description = "Task creation date", Example = "2024-01-01" },
-                new { Name = "EndDate", Aliases = new[] { "Resolved", "CompletedDate" }, Description = "Task completion date", Example = "2024-01-15" }
+                new { Name = "EndDate", Aliases = new[] { "Resolved", "CompletedDate" }, Description = "Task completion date", Example = "2024-01-15" },
+                new { Name = "Blocked", Aliases = new[] { "BlockedFlag", "Flagged" }, Description = "Blocked or Jira impediment indicator", Example = "true, Impediment" }
+            },
+            WorkbookSheets = new[]
+            {
+                new { Name = "Issues", Required = true, Description = "Jira issues with issue key, summary, status, and assignee" },
+                new { Name = "SprintSummary", Required = false, Description = "Sprint, planned/completed story points, velocity, health, capacity, and scope change" },
+                new { Name = "Burndown", Required = false, Description = "Date/day, actual remaining work, and ideal remaining work" },
+                new { Name = "Capacity", Required = false, Description = "Availability, worked hours, leave hours, and completed tasks" },
+                new { Name = "Quality", Required = false, Description = "Bug severity, coverage, technical debt, and Sonar issues" },
+                new { Name = "CI-CD", Required = false, Description = "Build success/failure and deployment measures" },
+                new { Name = "Risks", Required = false, Description = "Risk, probability, impact, and mitigation status" }
             },
             StatusValues = new
             {
@@ -375,15 +391,17 @@ public class SprintReportController : ControllerBase
             AdvancedFeatures = new
             {
                 AIOptimization = "The system automatically optimizes data processing to minimize AI costs",
+                ExcelWorkbookSupport = "Issues plus optional SprintSummary, Burndown, Capacity, Quality, CI-CD, and Risks sheets",
+                FourteenSlideDeck = "PowerPoint output always contains the required 14 sections with graph explanations",
                 SmartCaching = "Identical data sets are cached to avoid redundant AI processing",
                 DataCompression = "Large datasets are intelligently compressed before AI analysis",
                 QualityValidation = "Automatic data quality checks and suggestions for improvement"
             },
             Limits = new
             {
-                MaxFileSize = "10 MB",
-                RecommendedTaskCount = "Up to 500 tasks for optimal performance",
-                MaxTaskCount = "2000 tasks (larger files may experience slower processing)"
+                MaxFileSize = "25 MB",
+                RecommendedTaskCount = "Up to 10,000 issues",
+                MaxTaskCount = "20,000 issues"
             }
         };
 
@@ -857,15 +875,15 @@ public class SprintReportController : ControllerBase
 
     #region Helper Methods
 
-    private IActionResult? ValidateGenerateRequest(IFormFile csvFile, string outputFormat, string template)
+    private IActionResult? ValidateGenerateRequest(IFormFile dataFile, string outputFormat, string template)
     {
-        var csvValidationResult = ValidateCsvFile(csvFile);
-        if (csvValidationResult != null)
+        var dataValidationResult = ValidateDataFile(dataFile);
+        if (dataValidationResult != null)
         {
-            return csvValidationResult;
+            return dataValidationResult;
         }
 
-        var validFormats = new[] { "powerpoint", "html" };
+        var validFormats = new[] { "powerpoint" };
         if (!validFormats.Contains(outputFormat.ToLowerInvariant()))
         {
             return BadRequest(new { 
@@ -887,25 +905,27 @@ public class SprintReportController : ControllerBase
         return null;
     }
 
-    private IActionResult? ValidateCsvFile(IFormFile csvFile)
+    private IActionResult? ValidateDataFile(IFormFile dataFile)
     {
-        if (csvFile == null || csvFile.Length == 0)
+        if (dataFile == null || dataFile.Length == 0)
         {
             return BadRequest(new
             {
-                error = "Please upload a valid CSV file.",
+                error = "Please upload a valid CSV or Excel workbook.",
                 helpUrl = "/api/sprintreport/csv-format"
             });
         }
 
-        if (!csvFile.FileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+        var extension = Path.GetExtension(dataFile.FileName);
+        if (!extension.Equals(".csv", StringComparison.OrdinalIgnoreCase)
+            && !extension.Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
         {
-            return BadRequest(new { error = "File must have a .csv extension." });
+            return BadRequest(new { error = "File must have a .csv or .xlsx extension." });
         }
 
-        if (csvFile.Length > 10 * 1024 * 1024)
+        if (dataFile.Length > 25 * 1024 * 1024)
         {
-            return BadRequest(new { error = "File size must be 10 MB or less." });
+            return BadRequest(new { error = "File size must be 25 MB or less." });
         }
 
         return null;

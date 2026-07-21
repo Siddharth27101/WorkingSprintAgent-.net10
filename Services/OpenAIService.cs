@@ -337,12 +337,48 @@ public class OpenAIService : IOpenAIService
         var optimizedData = new
         {
             sprint = metrics.SprintName,
-            totals = new { tasks = metrics.TotalTasks, completed = metrics.CompletedTasks, rate = $"{metrics.CompletionRatePercent:F0}%" },
-            points = metrics.TotalStoryPoints > 0 ? new { total = metrics.TotalStoryPoints, completed = metrics.CompletedStoryPoints } : null,
-            blockers = metrics.BlockedTasks > 0 ? new { count = metrics.BlockedTasks, items = metrics.BlockedTaskTitles.Take(3) } : null,
-            status = metrics.TasksByStatus.Take(5).ToDictionary(k => k.Key, v => v.Value),
-            team = metrics.WorkloadByAssignee.Take(5).Select(a => new { name = a.Assignee, tasks = a.TotalTasks, done = a.CompletedTasks }),
-            priority = metrics.TasksByPriority.Any() ? metrics.TasksByPriority.Take(3).ToDictionary(k => k.Key, v => v.Value) : null
+            totals = new
+            {
+                tasks = metrics.TotalTasks,
+                completed = metrics.CompletedTasks,
+                rate = $"{metrics.CompletionRatePercent:F0}%",
+                health = $"{metrics.SprintHealthScore:F0}/100"
+            },
+            delivery = new
+            {
+                planned = metrics.PlannedWork,
+                completed = metrics.CompletedWork,
+                unit = metrics.WorkUnitLabel,
+                usesProxy = metrics.UsesWorkItemProxy,
+                workCompletionRate = metrics.WorkCompletionRatePercent,
+                capacityUtilization = metrics.HasCapacityData ? metrics.CapacityUtilizationPercent : (double?)null,
+                scopeChange = metrics.HasScopeData ? metrics.ScopeChangePercent : (double?)null
+            },
+            quality = new
+            {
+                bugs = metrics.BugCount,
+                critical = metrics.CriticalBugs,
+                major = metrics.MajorBugs,
+                coverage = metrics.CodeCoveragePercent,
+                technicalDebt = metrics.TechnicalDebtItems,
+                sonarIssues = metrics.SonarIssues
+            },
+            cicd = new
+            {
+                buildSuccessRate = metrics.BuildSuccessRatePercent,
+                deployments = metrics.DeploymentCount,
+                averageDeploymentMinutes = metrics.AverageDeploymentDurationMinutes
+            },
+            risk = new
+            {
+                blockers = metrics.BlockedTasks,
+                openRisks = metrics.OpenRiskCount,
+                highRisks = metrics.HighRiskCount,
+                items = metrics.Risks.Take(5).Select(risk => new { risk.Name, risk.Probability, risk.Impact, risk.MitigationStatus })
+            },
+            status = metrics.TasksByStatus.Take(6).ToDictionary(k => k.Key, v => v.Value),
+            team = metrics.WorkloadByAssignee.Take(7).Select(a => new { name = a.Assignee, tasks = a.TotalTasks, done = a.CompletedTasks }),
+            priority = metrics.TasksByPriority.Any() ? metrics.TasksByPriority.Take(5).ToDictionary(k => k.Key, v => v.Value) : null
         };
 
         return $"Analyze this sprint data and generate actionable insights:\n{JsonSerializer.Serialize(optimizedData, new JsonSerializerOptions { WriteIndented = false })}";

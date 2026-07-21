@@ -3,12 +3,12 @@ using System.ComponentModel.DataAnnotations;
 namespace WorkingSprintAgent.Models;
 
 /// <summary>
-/// Multipart form used to generate a sprint presentation from CSV data.
+/// Multipart form used to generate a sprint presentation from CSV or Excel data.
 /// </summary>
 public sealed class GenerateSprintReportRequest
 {
     /// <summary>
-    /// CSV file containing TaskId, Title, Status, and Assignee columns.
+    /// Sprint CSV or Excel workbook containing an Issues table/sheet.
     /// </summary>
     [Required]
     public IFormFile CsvFile { get; set; } = null!;
@@ -20,9 +20,9 @@ public sealed class GenerateSprintReportRequest
     public string? SprintName { get; set; }
 
     /// <summary>
-    /// Output type. Use powerpoint to download a .pptx file or html for an HTML presentation.
+    /// Output type. This workflow generates a PowerPoint presentation.
     /// </summary>
-    [RegularExpression("(?i)^(powerpoint|html)$", ErrorMessage = "OutputFormat must be 'powerpoint' or 'html'.")]
+    [RegularExpression("(?i)^powerpoint$", ErrorMessage = "OutputFormat must be 'powerpoint'.")]
     public string OutputFormat { get; set; } = "powerpoint";
 
     /// <summary>
@@ -44,7 +44,7 @@ public sealed class GenerateSprintReportRequest
 public sealed class PreviewSprintDataRequest
 {
     /// <summary>
-    /// CSV file containing TaskId, Title, Status, and Assignee columns.
+    /// Sprint CSV or Excel workbook containing an Issues table/sheet.
     /// </summary>
     [Required]
     public IFormFile CsvFile { get; set; } = null!;
