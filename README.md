@@ -1,6 +1,6 @@
 # Working Sprint Agent (.NET 10)
 
-An ASP.NET Core .NET 10 API that accepts Jira sprint data as CSV or a multi-sheet Excel workbook, calculates delivery/quality/risk metrics, asks OpenAI for concise insights, and returns a stakeholder-ready 14-slide PowerPoint presentation with charts and graph explanations.
+An ASP.NET Core .NET 10 API that accepts Jira sprint data as CSV or a multi-sheet Excel workbook, calculates delivery/quality/risk metrics, asks OpenAI for concise insights, and returns a stakeholder-ready 15-slide PowerPoint presentation with charts and graph explanations.
 
 ## Requirements
 
@@ -69,7 +69,7 @@ CSV or XLSX upload
   -> parse Issues and optional workbook analytics sheets
   -> calculate delivery, quality, capacity, scope, and risk metrics
   -> request structured OpenAI insights (or deterministic fallback)
-  -> create an exact 14-slide PowerPoint with charts and graph explanations
+  -> create an exact 15-slide PowerPoint with charts and graph explanations
   -> return the .pptx download
 ```
 

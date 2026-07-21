@@ -40,6 +40,28 @@ public class SprintMetrics
     public int HighRiskCount { get; set; }
     public int OpenRiskCount { get; set; }
     public DateTime? ReportSnapshotDate { get; set; }
+
+    // Workflow / carry-over signals
+    public int InProgressTasks { get; set; }
+    public int NotStartedTasks { get; set; }
+    public int CarryOverTasks { get; set; }
+
+    // Contributor concentration
+    public string TopContributor { get; set; } = string.Empty;
+    public int TopContributorCompleted { get; set; }
+    public double TopContributorSharePercent { get; set; }
+
+    // Quality depth
+    public double DefectDensityPercent { get; set; }
+    public double BugsPerContributor { get; set; }
+
+    // Delivery cadence / flow
+    public int DistinctSprintCount { get; set; }
+    public double AverageCycleTimeDays { get; set; }
+    public bool HasCycleTimeData { get; set; }
+
+    // Transparent health score components (signed point contributions)
+    public List<HealthComponent> HealthBreakdown { get; set; } = new();
     public Dictionary<string, int> TasksByStatus { get; set; } = new();
     public Dictionary<string, int> TasksByType { get; set; } = new();
     public Dictionary<string, int> TasksByPriority { get; set; } = new();
@@ -65,6 +87,14 @@ public class MetricPoint
     public string Label { get; set; } = string.Empty;
     public double Value { get; set; }
     public double? ComparisonValue { get; set; }
+}
+
+public class HealthComponent
+{
+    public string Label { get; set; } = string.Empty;
+    public double Points { get; set; }
+    public string Detail { get; set; } = string.Empty;
+    public bool IsTotal { get; set; }
 }
 
 public class RiskMetric

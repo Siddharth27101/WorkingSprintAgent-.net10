@@ -95,21 +95,42 @@ public class MockInsightGenerationService : IInsightGenerationService
 
     private static string GenerateExecutiveSummary(SprintMetrics metrics)
     {
-        var performance = metrics.CompletionRatePercent switch
+        var target = metrics.CompletionRatePercent switch
         {
-            >= 90 => "exceptional",
-            >= 80 => "strong", 
-            >= 70 => "solid",
-            >= 60 => "moderate",
-            _ => "challenging"
+            >= 90 => "at or above expectations",
+            >= 80 => "close to the expected target",
+            >= 70 => "slightly below the expected target",
+            >= 60 => "below the expected target",
+            _ => "significantly below the expected target"
         };
 
-        var blockerNote = metrics.BlockedTasks > 0 
-            ? $" {metrics.BlockedTasks} critical blocker{(metrics.BlockedTasks > 1 ? "s require" : " requires")} immediate attention."
-            : " No critical blockers identified.";
+        var sentences = new List<string>
+        {
+            $"{metrics.SprintName} completion reached {metrics.CompletionRatePercent:F0}% " +
+            $"({metrics.CompletedTasks} of {metrics.TotalTasks} issues), {target}, for a health score of {metrics.SprintHealthScore:F0}/100."
+        };
 
-        return $"{metrics.SprintName} achieved {performance} performance with {metrics.CompletionRatePercent:F1}% issue completion, " +
-               $"a sprint health score of {metrics.SprintHealthScore:F0}/100, and {metrics.CompletedWork:F1} of {metrics.PlannedWork:F1} {metrics.WorkUnitLabel.ToLowerInvariant()} delivered.{blockerNote}";
+        if (metrics.CarryOverTasks > 0)
+        {
+            var blockerClause = metrics.BlockedTasks > 0
+                ? $"{metrics.BlockedTasks} item(s) remain blocked and"
+                : "no blockers remain, yet";
+            sentences.Add($"With {blockerClause} {metrics.CarryOverTasks} issue(s) carried over " +
+                          $"({metrics.NotStartedTasks} never started), the data points to overcommitment or execution bottlenecks.");
+        }
+
+        if (!string.IsNullOrEmpty(metrics.TopContributor) && metrics.TopContributorSharePercent >= 20)
+        {
+            sentences.Add($"{metrics.TopContributor} led delivery with {metrics.TopContributorCompleted} completed issue(s) " +
+                          $"({metrics.TopContributorSharePercent:F0}% of all delivered work), suggesting an uneven workload.");
+        }
+
+        if (metrics.CriticalBugs > 0 || metrics.HighRiskCount > 0)
+        {
+            sentences.Add($"{metrics.CriticalBugs} critical bug(s) and {metrics.HighRiskCount} high-risk item(s) should be prioritised before sprint scope is increased.");
+        }
+
+        return string.Join(' ', sentences);
     }
 
     private static List<string> GenerateKeyHighlights(SprintMetrics metrics)
@@ -124,10 +145,19 @@ public class MockInsightGenerationService : IInsightGenerationService
             highlights.Add($"Delivered {metrics.CompletedWork:F1} of {metrics.PlannedWork:F1} {metrics.WorkUnitLabel.ToLowerInvariant()} ({deliveryRate:F0}%)");
         }
 
-        if (metrics.WorkloadByAssignee.Any())
+        if (!string.IsNullOrEmpty(metrics.TopContributor))
+        {
+            highlights.Add($"{metrics.TopContributor} led delivery with {metrics.TopContributorCompleted} completed issues ({metrics.TopContributorSharePercent:F0}% of delivered work)");
+        }
+        else if (metrics.WorkloadByAssignee.Any())
         {
             var topPerformer = metrics.WorkloadByAssignee.OrderByDescending(a => a.CompletedTasks).First();
             highlights.Add($"{topPerformer.Assignee} led team performance with {topPerformer.CompletedTasks} completed tasks");
+        }
+
+        if (metrics.HasCycleTimeData)
+        {
+            highlights.Add($"Average cycle time was {metrics.AverageCycleTimeDays:F1} day(s) from start to completion");
         }
 
         if (metrics.TasksByStatus.TryGetValue("Done", out var doneCount) && doneCount > 0)
@@ -135,7 +165,7 @@ public class MockInsightGenerationService : IInsightGenerationService
             highlights.Add($"Successfully closed {doneCount} items with quality deliverables");
         }
 
-        return highlights.Take(4).ToList();
+        return highlights.Take(5).ToList();
     }
 
     private static List<string> GenerateRisksAndBlockers(SprintMetrics metrics)
@@ -187,47 +217,67 @@ public class MockInsightGenerationService : IInsightGenerationService
     {
         var recommendations = new List<string>();
 
+        // Contributor concentration — call out the specific person and share.
+        if (!string.IsNullOrEmpty(metrics.TopContributor) && metrics.TopContributorSharePercent >= 30)
+        {
+            recommendations.Add(
+                $"{metrics.TopContributor} completed {metrics.TopContributorSharePercent:F0}% of all delivered work " +
+                $"({metrics.TopContributorCompleted} issues) — redistribute ownership to reduce concentration risk.");
+        }
+
+        // Right-size the next commitment based on demonstrated throughput.
+        if (metrics.CompletionRatePercent < 70 && metrics.TotalTasks > 0)
+        {
+            var suggestedCommitment = Math.Max(1, (int)Math.Round(metrics.CompletedTasks * 1.1));
+            var reduction = Math.Max(0, (int)Math.Round(100 - metrics.CompletionRatePercent - 10));
+            recommendations.Add(
+                $"Only {metrics.CompletionRatePercent:F0}% of issues were completed — reduce the next sprint commitment by ~{reduction}% " +
+                $"(to roughly {suggestedCommitment} issues) to match demonstrated throughput.");
+        }
+
+        // Quality first when critical defects exist.
+        if (metrics.CriticalBugs > 0)
+        {
+            recommendations.Add(
+                $"Prioritise the {metrics.CriticalBugs} critical bug(s) before accepting new feature work.");
+        }
+
+        // Stalled work that never started.
+        if (metrics.NotStartedTasks > 0)
+        {
+            recommendations.Add(
+                $"Analyse why {metrics.NotStartedTasks} issue(s) never moved beyond \"Not Started\" — refine intake, dependencies, or WIP limits.");
+        }
+
         if (metrics.BlockedTasks > 0)
         {
-            recommendations.Add("Prioritize resolving blocked items in next standup meeting");
+            recommendations.Add(
+                $"Clear the {metrics.BlockedTasks} blocked item(s) in the next standup before pulling in new scope.");
         }
 
-        if (metrics.CompletionRatePercent < 80)
+        if (metrics.HighRiskCount > 0)
         {
-            recommendations.Add("Review sprint planning process to improve task estimation accuracy");
-        }
-
-        if (metrics.WorkloadByAssignee.Any())
-        {
-            var workloadVariance = metrics.WorkloadByAssignee.Max(a => a.TotalTasks) - 
-                                 metrics.WorkloadByAssignee.Min(a => a.TotalTasks);
-            if (workloadVariance > 3)
-            {
-                recommendations.Add("Rebalance task distribution across team members for next sprint");
-            }
-        }
-
-        if (metrics.CompletionRatePercent >= 80)
-        {
-            recommendations.Add("Maintain current sprint velocity and team collaboration practices");
+            recommendations.Add(
+                $"Assign named owners and due dates to the {metrics.HighRiskCount} high-impact risk(s).");
         }
 
         if (metrics.ScopeChangePercent > 10)
         {
-            recommendations.Add("Add a sprint scope-change checkpoint and require explicit trade-offs for new work");
-        }
-
-        if (metrics.CriticalBugs > 0 || metrics.HighRiskCount > 0)
-        {
-            recommendations.Add("Assign named owners and due dates to critical defects and high-impact risks");
+            recommendations.Add(
+                $"Scope grew by {metrics.ScopeChangePercent:F0}% mid-sprint — add a scope-change checkpoint requiring explicit trade-offs.");
         }
 
         if (metrics.BuildFailureCount > 0)
         {
-            recommendations.Add("Review failed builds and strengthen CI quality gates before the next deployment");
+            recommendations.Add("Review failed builds and strengthen CI quality gates before the next deployment.");
         }
 
-        return recommendations.Take(5).ToList();
+        if (recommendations.Count == 0)
+        {
+            recommendations.Add("Maintain current velocity and collaboration practices; consider a modest stretch goal next sprint.");
+        }
+
+        return recommendations.Take(6).ToList();
     }
 
     private static string GenerateTeamPerformanceNarrative(SprintMetrics metrics)
@@ -242,9 +292,12 @@ public class MockInsightGenerationService : IInsightGenerationService
         var avgWorkPerPerson = teamSize == 0 ? 0 : metrics.PlannedWork / teamSize;
 
         var performance = metrics.CompletionRatePercent >= 80 ? "delivered strong results" : "faced some challenges";
-        
-        return $"Team of {teamSize} members {performance} with an average of {avgTasksPerPerson:F1} issues and {avgWorkPerPerson:F1} {metrics.WorkUnitLabel.ToLowerInvariant()} per person. " +
-               $"Collaboration and task distribution patterns show {(avgTasksPerPerson > 4 ? "high engagement" : "balanced workload")} across the sprint.";
+        var distribution = metrics.TopContributorSharePercent >= 35
+            ? $"delivery was concentrated, with {metrics.TopContributor} accounting for {metrics.TopContributorSharePercent:F0}% of completed work"
+            : "work was reasonably distributed across the team";
+
+        return $"A team of {teamSize} members {performance} with an average of {avgTasksPerPerson:F1} issues and {avgWorkPerPerson:F1} {metrics.WorkUnitLabel.ToLowerInvariant()} per person. " +
+               $"On distribution, {distribution}.";
     }
 
     private static string GenerateNextSprintFocus(SprintMetrics metrics)
@@ -261,7 +314,8 @@ public class MockInsightGenerationService : IInsightGenerationService
 
         if (metrics.CompletionRatePercent < 70)
         {
-            return "Prioritize sprint planning improvements and capacity management for better predictability.";
+            var suggestedCommitment = Math.Max(1, (int)Math.Round(metrics.CompletedTasks * 1.1));
+            return $"Right-size the next commitment to ~{suggestedCommitment} issues, clear {metrics.CarryOverTasks} carried-over item(s), and improve planning predictability.";
         }
 
         return "Continue current practices while identifying opportunities for process optimization.";

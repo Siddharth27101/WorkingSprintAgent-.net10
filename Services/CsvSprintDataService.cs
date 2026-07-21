@@ -180,8 +180,51 @@ public class CsvSprintDataService : ICsvSprintDataService
         metrics.HasRiskData = metrics.Risks.Count > 0;
         metrics.OpenRiskCount = metrics.Risks.Count;
         metrics.HighRiskCount = metrics.Risks.Count(risk => risk.Score >= 6);
+        metrics.DistinctSprintCount = distinctSprints.Count;
+        ComputeFlowAndConcentration(metrics, tasks);
         FinalizeHealthScore(metrics);
         return metrics;
+    }
+
+    private static void ComputeFlowAndConcentration(SprintMetrics metrics, List<SprintTask> tasks)
+    {
+        // Workflow distribution: separate active work from work that never started.
+        metrics.InProgressTasks = tasks.Count(task => !task.IsDone
+            && (task.Status.Contains("progress", StringComparison.OrdinalIgnoreCase)
+                || task.Status.Contains("review", StringComparison.OrdinalIgnoreCase)));
+        metrics.CarryOverTasks = Math.Max(0, metrics.TotalTasks - metrics.CompletedTasks);
+        metrics.NotStartedTasks = Math.Max(0, metrics.TotalTasks - metrics.CompletedTasks - metrics.InProgressTasks);
+
+        // Contributor concentration: how much of delivered work sits with one person.
+        var namedContributors = metrics.WorkloadByAssignee
+            .Where(member => !member.Assignee.Equals("Unassigned", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var top = namedContributors
+            .OrderByDescending(member => member.CompletedTasks)
+            .FirstOrDefault();
+        if (top is not null && metrics.CompletedTasks > 0 && top.CompletedTasks > 0)
+        {
+            metrics.TopContributor = top.Assignee;
+            metrics.TopContributorCompleted = top.CompletedTasks;
+            metrics.TopContributorSharePercent = Math.Round(top.CompletedTasks * 100.0 / metrics.CompletedTasks, 1);
+        }
+
+        // Quality depth.
+        metrics.DefectDensityPercent = Percentage(metrics.BugCount, metrics.TotalTasks);
+        var teamSize = Math.Max(1, metrics.WorkloadByAssignee.Count);
+        metrics.BugsPerContributor = Math.Round(metrics.BugCount / (double)teamSize, 1);
+
+        // Cycle time from start-to-completion when both dates are present.
+        var cycleTimes = tasks
+            .Where(task => task.IsDone && task.StartDate.HasValue && task.EndDate.HasValue)
+            .Select(task => (task.EndDate!.Value.Date - task.StartDate!.Value.Date).TotalDays)
+            .Where(days => days >= 0)
+            .ToList();
+        if (cycleTimes.Count > 0)
+        {
+            metrics.AverageCycleTimeDays = Math.Round(cycleTimes.Average(), 1);
+            metrics.HasCycleTimeData = true;
+        }
     }
 
     private static async Task<List<IReadOnlyDictionary<string, string>>> ReadCsvRowsAsync(
@@ -609,11 +652,55 @@ public class CsvSprintDataService : ICsvSprintDataService
 
     private static void FinalizeHealthScore(SprintMetrics metrics)
     {
-        if (metrics.HasSprintHealthScore) return;
+        if (metrics.HasSprintHealthScore)
+        {
+            // The score was supplied by the source workbook. Record an honest, minimal
+            // breakdown so the slide still explains where the number came from.
+            metrics.HealthBreakdown =
+            [
+                new HealthComponent
+                {
+                    Label = "Source workbook score",
+                    Points = metrics.SprintHealthScore,
+                    Detail = "Taken directly from the SprintSummary sheet"
+                },
+                new HealthComponent
+                {
+                    Label = "Overall health",
+                    Points = metrics.SprintHealthScore,
+                    IsTotal = true,
+                    Detail = "0-100"
+                }
+            ];
+            return;
+        }
+
+        const double baseline = 20;
+        var completion = Math.Round(metrics.CompletionRatePercent, 1);
         var blockedPenalty = Math.Min(25, metrics.BlockedTasks * 5);
         var riskPenalty = Math.Min(20, metrics.HighRiskCount * 5);
         var qualityPenalty = Math.Min(15, metrics.CriticalBugs * 3 + metrics.MajorBugs);
-        metrics.SprintHealthScore = Math.Round(Math.Clamp(metrics.CompletionRatePercent - blockedPenalty - riskPenalty - qualityPenalty + 20, 0, 100), 1);
+        var workloadPenalty = metrics.TopContributorSharePercent switch
+        {
+            >= 50 => 12,
+            >= 35 => 6,
+            _ => 0
+        };
+
+        var raw = baseline + completion - blockedPenalty - riskPenalty - qualityPenalty - workloadPenalty;
+        metrics.SprintHealthScore = Math.Round(Math.Clamp(raw, 0, 100), 1);
+
+        // Transparent, defensible breakdown so stakeholders can see how the score was derived.
+        metrics.HealthBreakdown =
+        [
+            new HealthComponent { Label = "Baseline", Points = baseline, Detail = "Starting allowance" },
+            new HealthComponent { Label = "Completion rate", Points = completion, Detail = $"{metrics.CompletedTasks}/{metrics.TotalTasks} issues done" },
+            new HealthComponent { Label = "Blocked tasks", Points = -blockedPenalty, Detail = $"{metrics.BlockedTasks} blocked (-5 each, max -25)" },
+            new HealthComponent { Label = "High risks", Points = -riskPenalty, Detail = $"{metrics.HighRiskCount} high-scoring risk(s) (-5 each, max -20)" },
+            new HealthComponent { Label = "Bug severity", Points = -qualityPenalty, Detail = $"{metrics.CriticalBugs} critical, {metrics.MajorBugs} major (max -15)" },
+            new HealthComponent { Label = "Workload balance", Points = -workloadPenalty, Detail = metrics.TopContributorSharePercent > 0 ? $"top contributor delivered {metrics.TopContributorSharePercent:F0}%" : "even distribution" },
+            new HealthComponent { Label = "Overall health", Points = metrics.SprintHealthScore, IsTotal = true, Detail = "clamped to 0-100" }
+        ];
     }
 
     private static WorkbookSheet? FindIssueSheet(IReadOnlyList<WorkbookSheet> sheets)

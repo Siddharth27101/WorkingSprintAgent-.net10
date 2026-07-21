@@ -229,19 +229,45 @@ public class SprintReportController : ControllerBase
                     metrics.ScopeChangePercent,
                     metrics.BugCount,
                     metrics.HighRiskCount,
+                    // Flow / carry-over signals
+                    metrics.InProgressTasks,
+                    metrics.NotStartedTasks,
+                    metrics.CarryOverTasks,
+                    // Contributor concentration
+                    metrics.TopContributor,
+                    metrics.TopContributorCompleted,
+                    metrics.TopContributorSharePercent,
+                    // Quality depth
+                    metrics.DefectDensityPercent,
+                    metrics.BugsPerContributor,
+                    metrics.CriticalBugs,
+                    metrics.MajorBugs,
+                    metrics.MinorBugs,
+                    // Delivery cadence / flow
+                    metrics.DistinctSprintCount,
+                    metrics.AverageCycleTimeDays,
+                    metrics.HasCycleTimeData,
                     metrics.TasksByStatus,
                     metrics.TasksByType,
                     metrics.TasksByPriority,
                     TeamMembers = metrics.WorkloadByAssignee.Count,
                     BlockedItems = metrics.BlockedTaskTitles.Count
                 },
-                
+
+                SprintHealthBreakdown = metrics.HealthBreakdown.Select(component => new
+                {
+                    component.Label,
+                    component.Points,
+                    component.Detail,
+                    component.IsTotal
+                }),
+
                 Insights = new
                 {
                     insights.ExecutiveSummary,
                     KeyHighlights = insights.KeyHighlights.Take(5),
-                    RisksAndBlockers = insights.RisksAndBlockers.Take(3),
-                    Recommendations = insights.Recommendations.Take(4),
+                    RisksAndBlockers = insights.RisksAndBlockers.Take(5),
+                    Recommendations = insights.Recommendations.Take(6),
                     insights.TeamPerformanceNarrative,
                     insights.NextSprintFocus
                 },
@@ -264,7 +290,7 @@ public class SprintReportController : ControllerBase
                 {
                     AvailableTemplates = _presentationService.GetAvailableTemplates().Select(t => new { t.Id, t.Name, t.Description }),
                     AvailableFormats = new[] { "powerpoint" },
-                    EstimatedSlides = 14,
+                    EstimatedSlides = 15,
                     EstimatedViewingTime = "18-24 minutes"
                 },
                 
@@ -343,7 +369,7 @@ public class SprintReportController : ControllerBase
     {
         var formatInfo = new
         {
-            Description = "Sprint CSV or Excel workbook format specification for AI-powered 14-slide analysis",
+            Description = "Sprint CSV or Excel workbook format specification for AI-powered 15-slide analysis",
             RequiredColumns = new[]
             {
                 new { Name = "TaskId", Aliases = new[] { "ID", "Key", "IssueKey" }, Description = "Unique identifier for the task", Example = "PROJ-123" },
@@ -392,7 +418,7 @@ public class SprintReportController : ControllerBase
             {
                 AIOptimization = "The system automatically optimizes data processing to minimize AI costs",
                 ExcelWorkbookSupport = "Issues plus optional SprintSummary, Burndown, Capacity, Quality, CI-CD, and Risks sheets",
-                FourteenSlideDeck = "PowerPoint output always contains the required 14 sections with graph explanations",
+                SlideDeck = "PowerPoint output always contains the required 15 sections with graph explanations",
                 SmartCaching = "Identical data sets are cached to avoid redundant AI processing",
                 DataCompression = "Large datasets are intelligently compressed before AI analysis",
                 QualityValidation = "Automatic data quality checks and suggestions for improvement"
