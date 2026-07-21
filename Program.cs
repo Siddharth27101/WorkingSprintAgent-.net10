@@ -73,6 +73,29 @@ builder.Logging.SetMinimumLevel(
 
 var app = builder.Build();
 
+// Startup diagnostics: confirm at boot whether the OpenAI key is actually loaded.
+// This makes it obvious whether the app is in "key missing" mode vs "key present but
+// the API call is failing", which is the common source of unexpected fallback output.
+{
+    var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup.OpenAI");
+    var openAiOptions = app.Services.GetRequiredService<IOptions<OpenAIConfiguration>>().Value;
+    if (string.IsNullOrWhiteSpace(openAiOptions.ApiKey))
+    {
+        startupLogger.LogWarning(
+            "OpenAI API key NOT detected in '{Environment}'. Insights will use the deterministic fallback. " +
+            "Set OpenAI:ApiKey in appsettings or the OPENAI_API_KEY environment variable.",
+            app.Environment.EnvironmentName);
+    }
+    else
+    {
+        var key = openAiOptions.ApiKey.Trim();
+        var masked = key.Length <= 8 ? "****" : $"{key[..4]}...{key[^4..]}";
+        startupLogger.LogInformation(
+            "OpenAI API key detected ({Masked}, length {Length}) in '{Environment}'. Model: {Model}. AI-powered insights enabled.",
+            masked, key.Length, app.Environment.EnvironmentName, openAiOptions.Model);
+    }
+}
+
 if (app.Environment.IsDevelopment())
 {
     app.UseDeveloperExceptionPage();
