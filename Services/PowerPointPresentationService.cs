@@ -332,7 +332,7 @@ public class PowerPointPresentationService
             var column = index % 4;
             var x = 685_800L + column * 2_250_000L;
             var y = 1_480_000L + row * 1_720_000L;
-            var fill = index % 3 switch
+            var fill = (index % 3) switch
             {
                 0 => theme.CardColor,
                 1 => theme.SecondaryCardColor,
