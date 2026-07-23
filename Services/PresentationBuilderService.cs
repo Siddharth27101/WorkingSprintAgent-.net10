@@ -63,10 +63,12 @@ public class PresentationBuilderService : IPresentationBuilderService
             "Cover",
             "Executive Summary",
             "Sprint Metrics Dashboard",
+            "Sprint Health Breakdown",
             "Velocity Trend",
             "Burndown Chart",
             "Story Completion",
             "Team Productivity",
+            "Team Workload & Delivery",
             "Quality Metrics",
             "Risk & Blockers",
             "Scope Changes",
@@ -81,7 +83,8 @@ public class PresentationBuilderService : IPresentationBuilderService
             "Planned vs completed velocity bars",
             "Actual vs ideal burndown line graph",
             "Story completion bars",
-            "Team productivity bars",
+            "Team productivity bars (done vs assigned)",
+            "Team workload & delivery table",
             "Risk exposure bars",
             "Cumulative scope line graph"
         };
@@ -237,8 +240,11 @@ public class PresentationBuilderService : IPresentationBuilderService
 
         if (metrics.WorkloadByAssignee.Any())
         {
+            var pointsHeader = metrics.UsesWorkItemProxy ? "Items (Done/Plan)" : "Story Points (Done/Plan)";
             html.AppendLine("<div class=\"team-table\"><table><thead><tr>")
-                .AppendLine("<th>Team Member</th><th>Total Tasks</th><th>Completed</th><th>Story Points</th><th>Completion %</th>")
+                .Append("<th>Team Member</th><th>Assigned</th><th>Completed</th><th>In Progress</th><th>")
+                .Append(EscapeHtml(pointsHeader))
+                .AppendLine("</th><th>Completion %</th>")
                 .AppendLine("</tr></thead><tbody>");
 
             foreach (var assignee in metrics.WorkloadByAssignee)
@@ -251,7 +257,8 @@ public class PresentationBuilderService : IPresentationBuilderService
                     .Append("<td>").Append(EscapeHtml(assignee.Assignee)).AppendLine("</td>")
                     .Append("<td>").Append(assignee.TotalTasks).AppendLine("</td>")
                     .Append("<td>").Append(assignee.CompletedTasks).AppendLine("</td>")
-                    .Append("<td>").Append(assignee.StoryPoints.ToString("F1")).AppendLine("</td>")
+                    .Append("<td>").Append(assignee.InProgressTasks).AppendLine("</td>")
+                    .Append("<td>").Append(assignee.CompletedStoryPoints.ToString("F1")).Append('/').Append(assignee.StoryPoints.ToString("F1")).AppendLine("</td>")
                     .Append("<td>").Append(completionRate.ToString("F0")).AppendLine("%</td></tr>");
             }
 

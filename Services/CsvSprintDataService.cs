@@ -152,7 +152,13 @@ public class CsvSprintDataService : ICsvSprintDataService
                 Assignee = group.Key,
                 TotalTasks = group.Count(),
                 CompletedTasks = group.Count(task => task.IsDone),
-                StoryPoints = hasStoryPoints ? group.Sum(task => task.StoryPoints) : group.Count()
+                InProgressTasks = group.Count(task => !task.IsDone
+                    && (task.Status.Contains("progress", StringComparison.OrdinalIgnoreCase)
+                        || task.Status.Contains("review", StringComparison.OrdinalIgnoreCase))),
+                StoryPoints = hasStoryPoints ? group.Sum(task => task.StoryPoints) : group.Count(),
+                CompletedStoryPoints = hasStoryPoints
+                    ? group.Where(task => task.IsDone).Sum(task => task.StoryPoints)
+                    : group.Count(task => task.IsDone)
             })
             .OrderByDescending(member => member.CompletedTasks)
             .ThenByDescending(member => member.TotalTasks)
