@@ -186,14 +186,6 @@ public class PowerPointPresentationService
                     : string.Empty) +
                 proxyNote),
             new SlideContent(
-                "Burndown Chart",
-                string.Empty,
-                SlideKind.LineChart,
-                new ChartContent(metrics.BurndownTrend, "Actual remaining", "Ideal remaining", "C73535", "7C8795"),
-                metrics.HasBurndownData
-                    ? "The red line is actual remaining work and the grey line is the ideal path to zero. An actual line above ideal indicates the sprint is burning work more slowly than planned."
-                    : "A dedicated Burndown sheet was not supplied. This red proxy line estimates remaining work from issue creation and update/completion dates; the grey line is an ideal path and should be treated as directional, not as an official daily burndown."),
-            new SlideContent(
                 "Story Completion",
                 string.Empty,
                 SlideKind.BarChart,
@@ -251,17 +243,6 @@ public class PowerPointPresentationService
                 SlideKind.BarChart,
                 new ChartContent(riskPoints, "Count", null, "C73535", "F2C7C7"),
                 "Taller red bars indicate greater delivery exposure. Blockers, high-scoring risks, critical bugs, and open risks should be reviewed first; workbook probability and impact are used when available."),
-            new SlideContent(
-                "Scope Changes",
-                string.Empty,
-                SlideKind.LineChart,
-                new ChartContent(metrics.ScopeTrend, "Cumulative scope", null, "D49B00", "D49B00"),
-                metrics.HasScopeData
-                    ? $"The line compares committed scope (indexed to 100) with final scope. {metrics.ScopeAddedItems} item(s) were added and the supplied scope change is {metrics.ScopeChangePercent:F1}%."
-                    : "No dedicated scope-change history was supplied. The flat line shows that scope creep cannot be calculated reliably from issue creation dates alone; add Scope Change or Added Items to SprintSummary for an evidence-based comparison."),
-            new SlideContent(
-                "Key Achievements",
-                FormatItems(insights.KeyHighlights, 7)),
             new SlideContent(
                 "Challenges",
                 $"Delivery challenges:\n{FormatItems(insights.RisksAndBlockers, 6)}\n\n" +
@@ -432,8 +413,7 @@ public class PowerPointPresentationService
         var heading = lines.ElementAtOrDefault(0) ?? "Sprint Report";
         var subtitle = string.Join('\n', lines.Skip(1));
         return BuildGradientShape(2, "Cover panel", 0, 0, SlideWidth, SlideHeight, theme.TitleColor, theme.CardColor, 60)
-            + BuildFilledShape(6, "Cover accent", 850_000, 1_400_000, 1_900_000, 60_000, theme.AccentColor, "roundRect")
-            + BuildTextShape(3, "Slide title", content.Title.ToUpperInvariant(), 850_000, 900_000, 3_000_000, 450_000, 1100, true, "FFFFFF")
+            + BuildFilledShape(6, "Cover accent", 3_579_200, 2_050_000, 2_900_000, 60_000, theme.AccentColor, "roundRect")
             + BuildTextShape(4, "Cover heading", heading, 850_000, 2_300_000, 8_350_000, 1_700_000, 3400, true, "FFFFFF", "ctr")
             + BuildTextShape(5, "Cover subtitle", subtitle, 1_300_000, 4_150_000, 7_450_000, 1_400_000, 1700, false, "FFFFFF", "ctr");
     }

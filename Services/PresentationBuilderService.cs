@@ -65,14 +65,11 @@ public class PresentationBuilderService : IPresentationBuilderService
             "Sprint Metrics Dashboard",
             "Sprint Health Breakdown",
             "Velocity Trend",
-            "Burndown Chart",
             "Story Completion",
             "Team Productivity",
             "Team Workload & Delivery",
             "Quality Metrics",
             "Risk & Blockers",
-            "Scope Changes",
-            "Key Achievements",
             "Challenges",
             "AI Recommendations",
             "Next Sprint Action Items"
@@ -81,12 +78,10 @@ public class PresentationBuilderService : IPresentationBuilderService
         var chartTypes = new List<string>
         {
             "Planned vs completed velocity bars",
-            "Actual vs ideal burndown line graph",
             "Story completion bars",
             "Team productivity bars (done vs assigned)",
             "Team workload & delivery table",
-            "Risk exposure bars",
-            "Cumulative scope line graph"
+            "Risk exposure bars"
         };
 
         return new PresentationSummary

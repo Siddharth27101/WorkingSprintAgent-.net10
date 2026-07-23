@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Upload sprint CSV or Excel data, analyze it with an agent workflow, and download a 14-slide PowerPoint report.">
+    <meta name="description" content="Upload sprint CSV or Excel data, analyze it with an agent workflow, and download a 13-slide PowerPoint report.">
     <title>Working Sprint Agent</title>
     <style>
         :root {
@@ -70,6 +70,11 @@
         .field.wide { grid-column: 1 / -1; }
         input[type="text"], select { width: 100%; height: 46px; padding: 0 13px; border: 1px solid #cbd7e6; border-radius: 11px; color: var(--ink); background: white; font: inherit; outline: none; }
         input[type="text"]:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(49, 87, 213, .12); }
+        .template-preview { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 11px; background: #f9fbfe; animation: fadePreview .3s ease; }
+        .template-preview small { color: var(--muted); font-size: .8rem; line-height: 1.45; }
+        .swatches { display: inline-flex; flex: 0 0 auto; gap: 5px; }
+        .swatches span { width: 18px; height: 18px; border-radius: 6px; box-shadow: inset 0 0 0 1px rgba(24, 34, 53, .12); }
+        @keyframes fadePreview { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
         .actions { display: flex; flex-wrap: wrap; gap: 11px; margin-top: 23px; }
         button, .button-link { display: inline-flex; min-height: 46px; padding: 0 19px; align-items: center; justify-content: center; border: 0; border-radius: 11px; font: inherit; font-size: .9rem; font-weight: 800; text-decoration: none; cursor: pointer; transition: .18s ease; }
         button:hover, .button-link:hover { transform: translateY(-1px); }
@@ -130,7 +135,7 @@
             <div>
                 <span class="eyebrow">ASP.NET Core · .NET 10</span>
                 <h1>Turn sprint data into a stakeholder-ready deck.</h1>
-                <p class="hero-copy">Upload a Jira CSV or multi-sheet Excel workbook and let the orchestrator coordinate sprint analysis, chart explanations, and a 14-slide PowerPoint. If OpenAI is not configured, the analysis agent automatically uses a deterministic fallback.</p>
+                <p class="hero-copy">Upload a Jira CSV or multi-sheet Excel workbook and let the orchestrator coordinate sprint analysis, chart explanations, and a 13-slide PowerPoint. If OpenAI is not configured, the analysis agent automatically uses a deterministic fallback.</p>
             </div>
             <div class="workflow" aria-label="Agent workflow">
                 <p class="workflow-title">Live architecture</p>
@@ -147,7 +152,7 @@
         <section class="workspace">
             <form id="reportForm" class="card form-card">
                 <h2>Create a sprint report</h2>
-                <p class="card-intro">Upload a Jira CSV or an Excel workbook with an Issues sheet. Optional SprintSummary, Burndown, Capacity, Quality, CI/CD, and Risks sheets enrich the 14-slide deck. Maximum file size: 25 MB.</p>
+                <p class="card-intro">Upload a Jira CSV or an Excel workbook with an Issues sheet. Optional SprintSummary, Capacity, Quality, CI/CD, and Risks sheets enrich the 13-slide deck. Maximum file size: 25 MB.</p>
 
                 <label for="csvFile">Sprint data file</label>
                 <div id="dropZone" class="drop-zone">
@@ -166,13 +171,17 @@
                         <input id="sprintName" name="SprintName" type="text" maxlength="150" placeholder="e.g. Sprint 24">
                     </div>
                     <div class="field">
-                        <label for="template">Presentation template</label>
+                        <label for="template">Presentation style</label>
                         <select id="template" name="Template">
-                            <option value="professional">Professional</option>
-                            <option value="modern">Modern</option>
-                            <option value="corporate">Corporate</option>
-                            <option value="minimal">Minimal</option>
+                            <option value="Professional">Professional</option>
+                            <option value="Modern">Modern</option>
+                            <option value="Corporate">Corporate</option>
+                            <option value="Minimal">Minimal</option>
                         </select>
+                        <div id="templatePreview" class="template-preview" aria-live="polite">
+                            <span id="templateSwatches" class="swatches" aria-hidden="true"></span>
+                            <small id="templateDesc"></small>
+                        </div>
                     </div>
                     <div class="field wide">
                         <label for="companyName">Company name <span aria-hidden="true">(optional)</span></label>
@@ -193,7 +202,7 @@
                     <h2>Workflow status</h2>
                     <p>Agent activity and analysis results appear here.</p>
                 </div>
-                <div id="status"><p class="idle">Select a sprint CSV or Excel workbook, then preview the analysis or generate the final 14-slide PowerPoint.</p></div>
+                <div id="status"><p class="idle">Select a sprint CSV or Excel workbook, then preview the analysis or generate the final 13-slide PowerPoint.</p></div>
             </aside>
         </section>
     </main>
@@ -215,6 +224,30 @@
         ['dragenter', 'dragover'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.add('dragging')));
         ['dragleave', 'drop'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragging')));
 
+        const templateSelect = document.getElementById('template');
+        const templateSwatches = document.getElementById('templateSwatches');
+        const templateDesc = document.getElementById('templateDesc');
+        const templatePreview = document.getElementById('templatePreview');
+        const templateStyles = {
+            Professional: { colors: ['#243447', '#3279B7', '#D49B00'], desc: 'Clean corporate blue palette — the safe pick for stakeholder and board reviews.' },
+            Modern: { colors: ['#603C8F', '#27864B', '#D49B00'], desc: 'Vibrant purple palette with contemporary contrast for team demos.' },
+            Corporate: { colors: ['#17365D', '#3279B7', '#D49B00'], desc: 'Formal navy palette; pair with a company name for branded executive decks.' },
+            Minimal: { colors: ['#111111', '#444444', '#6B7280'], desc: 'Distraction-free monochrome layout that puts the content first.' }
+        };
+
+        function updateTemplatePreview() {
+            const style = templateStyles[templateSelect.value] || templateStyles.Professional;
+            templateSwatches.innerHTML = style.colors
+                .map(color => `<span style="background:${color}"></span>`)
+                .join('');
+            templateDesc.textContent = style.desc;
+            templatePreview.style.animation = 'none';
+            requestAnimationFrame(() => { templatePreview.style.animation = ''; });
+        }
+
+        templateSelect.addEventListener('change', updateTemplatePreview);
+        updateTemplatePreview();
+
         form.addEventListener('submit', async event => {
             event.preventDefault();
             if (!validateFile()) return;
@@ -223,7 +256,6 @@
 
             try {
                 const data = createFormData();
-                data.append('OutputFormat', 'powerpoint');
                 const response = await fetch('/api/SprintReport/generate', { method: 'POST', body: data });
                 if (!response.ok) throw new Error(await getErrorMessage(response));
 
