@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
 using WorkingSprintAgent.Middleware;
 using WorkingSprintAgent.Models;
@@ -23,7 +24,9 @@ builder.Services.AddOptions<SemanticKernelOptions>()
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
