@@ -20,22 +20,26 @@ public sealed class GenerateSprintReportRequest
     public string? SprintName { get; set; }
 
     /// <summary>
-    /// Output type. This workflow generates a PowerPoint presentation.
+    /// Presentation style. Rendered as a dropdown in Swagger.
     /// </summary>
-    [RegularExpression("(?i)^powerpoint$", ErrorMessage = "OutputFormat must be 'powerpoint'.")]
-    public string OutputFormat { get; set; } = "powerpoint";
-
-    /// <summary>
-    /// Presentation style: professional, modern, corporate, or minimal.
-    /// </summary>
-    [RegularExpression("(?i)^(professional|modern|corporate|minimal)$", ErrorMessage = "Template must be professional, modern, corporate, or minimal.")]
-    public string Template { get; set; } = "professional";
+    public PresentationStyle Template { get; set; } = PresentationStyle.Professional;
 
     /// <summary>
     /// Optional company name displayed on the title slide.
     /// </summary>
     [StringLength(150)]
     public string? CompanyName { get; set; }
+}
+
+/// <summary>
+/// Available presentation styles for the generated PowerPoint deck.
+/// </summary>
+public enum PresentationStyle
+{
+    Professional,
+    Modern,
+    Corporate,
+    Minimal
 }
 
 /// <summary>

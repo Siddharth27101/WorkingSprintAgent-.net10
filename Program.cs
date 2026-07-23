@@ -111,7 +111,7 @@ app.UseSwaggerUI(options =>
 {
     options.SwaggerEndpoint("/swagger/v1/swagger.json", "Working Sprint Agent API v1");
     options.RoutePrefix = "swagger";
-    options.DocumentTitle = "Working Sprint Agent API - CSV/XLSX to 15-slide PowerPoint";
+    options.DocumentTitle = "Working Sprint Agent API - CSV/XLSX to 13-slide PowerPoint";
     options.DisplayRequestDuration();
     options.EnableDeepLinking();
     options.EnableFilter();
@@ -181,7 +181,7 @@ static object CreateSystemInformation(
         },
         Workflow = semanticKernelActive
             ? "CSV/XLSX plugin -> ChatCompletionAgent analyst -> coach -> quality reviewer -> optional manager -> presentation plugin"
-            : "Deterministic CSV/XLSX parse -> analysis -> 15-slide presentation",
+            : "Deterministic CSV/XLSX parse -> analysis -> 13-slide presentation",
         MainEndpoints = new[]
         {
             "GET /api/sprintreport/sample-csv",

@@ -64,10 +64,7 @@ public class SprintReportController : ControllerBase
         [FromForm] GenerateSprintReportRequest request,
         CancellationToken cancellationToken = default)
     {
-        var validationResult = ValidateGenerateRequest(
-            request.CsvFile,
-            request.OutputFormat,
-            request.Template);
+        var validationResult = ValidateDataFile(request.CsvFile);
         if (validationResult is not null)
         {
             return validationResult;
@@ -81,10 +78,11 @@ public class SprintReportController : ControllerBase
                 request.CsvFile.Length);
 
             const PresentationFormat outputFormat = PresentationFormat.PowerPoint;
+            var template = request.Template.ToString().ToLowerInvariant();
 
             var options = new SprintReportGenerationOptions(
                 request.SprintName,
-                request.Template,
+                template,
                 request.CompanyName,
                 outputFormat);
 
@@ -290,8 +288,8 @@ public class SprintReportController : ControllerBase
                 {
                     AvailableTemplates = _presentationService.GetAvailableTemplates().Select(t => new { t.Id, t.Name, t.Description }),
                     AvailableFormats = new[] { "powerpoint" },
-                    EstimatedSlides = 15,
-                    EstimatedViewingTime = "18-24 minutes"
+                    EstimatedSlides = 13,
+                    EstimatedViewingTime = "15-20 minutes"
                 },
                 
                 SampleTasks = tasks.Take(5).Select(t => new
@@ -369,7 +367,7 @@ public class SprintReportController : ControllerBase
     {
         var formatInfo = new
         {
-            Description = "Sprint CSV or Excel workbook format specification for AI-powered 15-slide analysis",
+            Description = "Sprint CSV or Excel workbook format specification for AI-powered 13-slide analysis",
             RequiredColumns = new[]
             {
                 new { Name = "TaskId", Aliases = new[] { "ID", "Key", "IssueKey" }, Description = "Unique identifier for the task", Example = "PROJ-123" },
@@ -418,7 +416,7 @@ public class SprintReportController : ControllerBase
             {
                 AIOptimization = "The system automatically optimizes data processing to minimize AI costs",
                 ExcelWorkbookSupport = "Issues plus optional SprintSummary, Burndown, Capacity, Quality, CI-CD, and Risks sheets",
-                SlideDeck = "PowerPoint output always contains the required 15 sections with graph explanations",
+                SlideDeck = "PowerPoint output contains 13 focused sections with graph explanations",
                 SmartCaching = "Identical data sets are cached to avoid redundant AI processing",
                 DataCompression = "Large datasets are intelligently compressed before AI analysis",
                 QualityValidation = "Automatic data quality checks and suggestions for improvement"
@@ -900,36 +898,6 @@ public class SprintReportController : ControllerBase
     }
 
     #region Helper Methods
-
-    private IActionResult? ValidateGenerateRequest(IFormFile dataFile, string outputFormat, string template)
-    {
-        var dataValidationResult = ValidateDataFile(dataFile);
-        if (dataValidationResult != null)
-        {
-            return dataValidationResult;
-        }
-
-        var validFormats = new[] { "powerpoint" };
-        if (!validFormats.Contains(outputFormat.ToLowerInvariant()))
-        {
-            return BadRequest(new { 
-                error = "Invalid output format. Supported formats: " + string.Join(", ", validFormats),
-                supportedFormats = validFormats 
-            });
-        }
-
-        var validTemplates = new[] { "professional", "modern", "corporate", "minimal" };
-        if (!validTemplates.Contains(template.ToLowerInvariant()))
-        {
-            return BadRequest(new { 
-                error = "Invalid template. Available templates: " + string.Join(", ", validTemplates),
-                availableTemplates = validTemplates,
-                templatesUrl = "/api/sprintreport/templates"
-            });
-        }
-
-        return null;
-    }
 
     private IActionResult? ValidateDataFile(IFormFile dataFile)
     {
