@@ -89,6 +89,53 @@ public class PowerPointPresentationService
                 Value = member.CompletedTasks,
                 ComparisonValue = member.TotalTasks
             }).ToList();
+
+        var teamMembers = metrics.WorkloadByAssignee.Take(9).ToList();
+        var pointsHeader = metrics.UsesWorkItemProxy ? "Items (Done/Plan)" : "Story pts (Done/Plan)";
+        var teamTableRows = new List<IReadOnlyList<string>>();
+        foreach (var member in teamMembers)
+        {
+            teamTableRows.Add(new[]
+            {
+                member.Assignee,
+                member.TotalTasks.ToString(),
+                member.CompletedTasks.ToString(),
+                member.InProgressTasks.ToString(),
+                $"{member.CompletedStoryPoints:0.#}/{member.StoryPoints:0.#}",
+                $"{member.CompletionRatePercent:F0}%"
+            });
+        }
+
+        if (teamMembers.Count > 0)
+        {
+            var totalAssigned = teamMembers.Sum(member => member.TotalTasks);
+            var totalCompleted = teamMembers.Sum(member => member.CompletedTasks);
+            var totalInProgress = teamMembers.Sum(member => member.InProgressTasks);
+            var totalDonePoints = teamMembers.Sum(member => member.CompletedStoryPoints);
+            var totalPlanPoints = teamMembers.Sum(member => member.StoryPoints);
+            var totalRate = totalAssigned == 0 ? 0 : totalCompleted * 100.0 / totalAssigned;
+            teamTableRows.Add(new[]
+            {
+                "TEAM TOTAL",
+                totalAssigned.ToString(),
+                totalCompleted.ToString(),
+                totalInProgress.ToString(),
+                $"{totalDonePoints:0.#}/{totalPlanPoints:0.#}",
+                $"{totalRate:F0}%"
+            });
+        }
+
+        var topLoad = metrics.WorkloadByAssignee
+            .Where(member => !member.Assignee.Equals("Unassigned", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(member => member.TotalTasks)
+            .FirstOrDefault();
+        var teamProductivityNarrative =
+            "Each member shows completed work (solid bar) against the total assigned to them (light bar); the label reads done/assigned. " +
+            (topLoad is not null
+                ? $"{topLoad.Assignee} carries the heaviest load at {topLoad.TotalTasks} assigned ({topLoad.CompletedTasks} done, {topLoad.CompletionRatePercent:F0}%). "
+                : string.Empty) +
+            "A short solid bar next to a long light bar signals an overloaded or blocked owner. " +
+            insights.TeamPerformanceNarrative;
         var riskPoints = new List<MetricPoint>
         {
             new() { Label = "Blocked", Value = metrics.BlockedTasks },
@@ -97,11 +144,11 @@ public class PowerPointPresentationService
             new() { Label = "Open risks", Value = metrics.OpenRiskCount }
         };
 
-        return
+        List<SlideContent> slides =
         [
             new SlideContent(
                 "Cover",
-                $"{metrics.SprintName} - Sprint Report\nGenerated on {DateTime.Now:MMMM dd, yyyy}{company}\n15-slide sprint intelligence briefing",
+                $"{metrics.SprintName} - Sprint Report\nGenerated on {DateTime.Now:MMMM dd, yyyy}{company}",
                 SlideKind.Cover),
             new SlideContent(
                 "Executive Summary",
@@ -163,7 +210,23 @@ public class PowerPointPresentationService
                 string.Empty,
                 SlideKind.BarChart,
                 new ChartContent(teamPoints, "Completed", "Assigned", "603C8F", "D8CBE8"),
-                $"Bars rank up to seven assignees by completed issues against assigned issues. {insights.TeamPerformanceNarrative}"),
+                teamProductivityNarrative),
+            new SlideContent(
+                "Team Workload & Delivery",
+                string.Empty,
+                SlideKind.Table,
+                Explanation:
+                    "Assigned = issues owned by the member; Completed = issues finished; In Progress = actively being worked. " +
+                    $"The {pointsHeader.ToLowerInvariant()} column contrasts delivered effort with the effort planned for that person, and Completion is completed \u00f7 assigned. " +
+                    "Read across a row to see whether an owner delivered what they took on, and compare rows to balance load in the next sprint. " +
+                    (metrics.UsesWorkItemProxy
+                        ? "Story points were not supplied, so issue counts are used as a labelled proxy for effort."
+                        : "Effort figures use the story points supplied in the source data."),
+                Table: new TableContent(
+                    new[] { "Team member", "Assigned", "Completed", "In progress", pointsHeader, "Completion" },
+                    teamTableRows,
+                    new[] { 30, 12, 12, 13, 19, 14 },
+                    HasTotalRow: teamMembers.Count > 0)),
             new SlideContent(
                 "Quality Metrics",
                 $"Defect density: {metrics.DefectDensityPercent:F1}% of issues are bugs ({metrics.BugCount} of {metrics.TotalTasks}); ~{metrics.BugsPerContributor:F1} bugs per contributor.\n" +
@@ -218,6 +281,13 @@ public class PowerPointPresentationService
                 $"• Triage the {metrics.CarryOverTasks} carried-over item(s), including {metrics.NotStartedTasks} that never started.\n" +
                 "• Reconfirm capacity, owners, due dates, and mitigation status at sprint kickoff.")
         ];
+
+        slides[0] = slides[0] with
+        {
+            Body = $"{metrics.SprintName} - Sprint Report\nGenerated on {DateTime.Now:MMMM dd, yyyy}{company}\n{slides.Count}-slide sprint intelligence briefing"
+        };
+
+        return slides;
     }
 
     private static List<MetricCard> BuildHealthCards(SprintMetrics metrics)
@@ -337,6 +407,7 @@ public class PowerPointPresentationService
             SlideKind.Dashboard => BuildDashboard(content, theme),
             SlideKind.BarChart => BuildBarChart(content, theme),
             SlideKind.LineChart => BuildLineChart(content, theme),
+            SlideKind.Table => BuildTable(content, theme),
             _ => BuildTextBody(content, theme)
         };
 
@@ -360,10 +431,11 @@ public class PowerPointPresentationService
         var lines = content.Body.Replace("\r", string.Empty, StringComparison.Ordinal).Split('\n');
         var heading = lines.ElementAtOrDefault(0) ?? "Sprint Report";
         var subtitle = string.Join('\n', lines.Skip(1));
-        return BuildFilledShape(2, "Cover panel", 0, 0, SlideWidth, SlideHeight, theme.TitleColor)
-            + BuildTextShape(3, "Slide title", content.Title.ToUpperInvariant(), 850_000, 850_000, 2_000_000, 450_000, 1050, true, "FFFFFF")
-            + BuildTextShape(4, "Cover heading", heading, 850_000, 2_150_000, 8_350_000, 1_700_000, 3400, true, "FFFFFF", "ctr")
-            + BuildTextShape(5, "Cover subtitle", subtitle, 1_300_000, 4_100_000, 7_450_000, 1_200_000, 1800, false, "FFFFFF", "ctr");
+        return BuildGradientShape(2, "Cover panel", 0, 0, SlideWidth, SlideHeight, theme.TitleColor, theme.CardColor, 60)
+            + BuildFilledShape(6, "Cover accent", 850_000, 1_400_000, 1_900_000, 60_000, theme.AccentColor, "roundRect")
+            + BuildTextShape(3, "Slide title", content.Title.ToUpperInvariant(), 850_000, 900_000, 3_000_000, 450_000, 1100, true, "FFFFFF")
+            + BuildTextShape(4, "Cover heading", heading, 850_000, 2_300_000, 8_350_000, 1_700_000, 3400, true, "FFFFFF", "ctr")
+            + BuildTextShape(5, "Cover subtitle", subtitle, 1_300_000, 4_150_000, 7_450_000, 1_400_000, 1700, false, "FFFFFF", "ctr");
     }
 
     private static string BuildTextBody(SlideContent content, PresentationTheme theme)
@@ -391,7 +463,7 @@ public class PowerPointPresentationService
                 1 => theme.SecondaryCardColor,
                 _ => theme.AccentColor
             };
-            xml.Append(BuildRoundedRect(10u + (uint)index, $"Metric {index + 1}", x, y, 1_980_000, 1_380_000, fill));
+            xml.Append(BuildRoundedRect(10u + (uint)index, $"Metric {index + 1}", x, y, 1_980_000, 1_380_000, fill, shadow: true));
             xml.Append(BuildTextShape(30u + (uint)index, $"Metric value {index + 1}", cards[index].Value, x + 90_000, y + 210_000, 1_800_000, 520_000, 2350, true, "FFFFFF", "ctr"));
             xml.Append(BuildTextShape(50u + (uint)index, $"Metric label {index + 1}", cards[index].Label, x + 90_000, y + 800_000, 1_800_000, 350_000, 1150, false, "FFFFFF", "ctr"));
         }
@@ -409,8 +481,8 @@ public class PowerPointPresentationService
         var points = chart.Points.Take(8).ToList();
         var xml = new StringBuilder();
         xml.Append(BuildChartHeader(content.Title, chart, theme));
-        xml.Append(BuildFilledShape(6, "Chart panel", 550_000, 1_400_000, 6_050_000, 5_300_000, theme.PanelColor));
-        xml.Append(BuildFilledShape(7, "Explanation panel", 6_820_000, 1_400_000, 2_650_000, 5_300_000, theme.ExplanationColor));
+        xml.Append(BuildRoundedRect(6, "Chart panel", 550_000, 1_400_000, 6_050_000, 5_300_000, theme.PanelColor, shadow: true));
+        xml.Append(BuildRoundedRect(7, "Explanation panel", 6_820_000, 1_400_000, 2_650_000, 5_300_000, theme.ExplanationColor, shadow: true));
         xml.Append(BuildTextShape(8, "Explanation heading", "GRAPH EXPLANATION", 7_050_000, 1_680_000, 2_200_000, 400_000, 1050, true, theme.TitleColor));
         xml.Append(BuildTextShape(9, "Explanation", content.Explanation, 7_050_000, 2_180_000, 2_150_000, 3_850_000, 1150, false, theme.TextColor));
         if (!string.IsNullOrWhiteSpace(content.Body))
@@ -434,13 +506,16 @@ public class PowerPointPresentationService
             xml.Append(BuildTextShape(20u + (uint)index, $"Category {index + 1}", label, 720_000, y, 1_500_000, 340_000, 950, false, theme.TextColor));
             if (point.ComparisonValue.HasValue)
             {
-                var comparisonWidth = Math.Max(15_000, (long)(3_700_000 * point.ComparisonValue.Value / max));
-                xml.Append(BuildFilledShape(40u + (uint)index, $"Comparison bar {index + 1}", 2_200_000, y + 65_000, comparisonWidth, 170_000, chart.ComparisonColor));
+                var comparisonWidth = Math.Max(30_000, (long)(3_700_000 * point.ComparisonValue.Value / max));
+                xml.Append(BuildFilledShape(40u + (uint)index, $"Comparison bar {index + 1}", 2_200_000, y + 60_000, comparisonWidth, 175_000, chart.ComparisonColor, "roundRect"));
             }
 
-            var valueWidth = Math.Max(15_000, (long)(3_700_000 * point.Value / max));
-            xml.Append(BuildFilledShape(60u + (uint)index, $"Value bar {index + 1}", 2_200_000, y + 245_000, valueWidth, 210_000, chart.PrimaryColor));
-            xml.Append(BuildTextShape(80u + (uint)index, $"Value label {index + 1}", point.Value.ToString("0.#"), 5_980_000, y + 150_000, 420_000, 300_000, 900, true, theme.TextColor, "r"));
+            var valueWidth = Math.Max(30_000, (long)(3_700_000 * point.Value / max));
+            xml.Append(BuildFilledShape(60u + (uint)index, $"Value bar {index + 1}", 2_200_000, y + 245_000, valueWidth, 210_000, chart.PrimaryColor, "roundRect", shadow: true));
+            var valueText = point.ComparisonValue.HasValue
+                ? $"{point.Value:0.#}/{point.ComparisonValue.Value:0.#}"
+                : point.Value.ToString("0.#");
+            xml.Append(BuildTextShape(80u + (uint)index, $"Value label {index + 1}", valueText, 5_760_000, y + 150_000, 780_000, 300_000, 900, true, theme.TextColor, "r"));
         }
 
         return xml.ToString();
@@ -452,8 +527,8 @@ public class PowerPointPresentationService
         var points = chart.Points.Take(20).ToList();
         var xml = new StringBuilder();
         xml.Append(BuildChartHeader(content.Title, chart, theme));
-        xml.Append(BuildFilledShape(6, "Chart panel", 550_000, 1_400_000, 6_050_000, 5_300_000, theme.PanelColor));
-        xml.Append(BuildFilledShape(7, "Explanation panel", 6_820_000, 1_400_000, 2_650_000, 5_300_000, theme.ExplanationColor));
+        xml.Append(BuildRoundedRect(6, "Chart panel", 550_000, 1_400_000, 6_050_000, 5_300_000, theme.PanelColor, shadow: true));
+        xml.Append(BuildRoundedRect(7, "Explanation panel", 6_820_000, 1_400_000, 2_650_000, 5_300_000, theme.ExplanationColor, shadow: true));
         xml.Append(BuildTextShape(8, "Explanation heading", "GRAPH EXPLANATION", 7_050_000, 1_680_000, 2_200_000, 400_000, 1050, true, theme.TitleColor));
         xml.Append(BuildTextShape(9, "Explanation", content.Explanation, 7_050_000, 2_180_000, 2_150_000, 4_000_000, 1150, false, theme.TextColor));
         if (points.Count == 0)
@@ -510,6 +585,90 @@ public class PowerPointPresentationService
             + BuildFilledShape(4, "Title accent", 685_800, 1_150_000, 1_600_000, 55_000, theme.AccentColor);
     }
 
+    private static string BuildTable(SlideContent content, PresentationTheme theme)
+    {
+        var xml = new StringBuilder();
+        xml.Append(BuildTextShape(2, "Title", content.Title, 685_800, 300_000, 8_686_800, 800_000, 2900, true, theme.TitleColor));
+        xml.Append(BuildFilledShape(3, "Title accent", 685_800, 1_150_000, 1_600_000, 55_000, theme.AccentColor));
+
+        var table = content.Table;
+        if (table is null || table.Rows.Count == 0)
+        {
+            xml.Append(BuildTextShape(4, "No data", "No team data was supplied.", 850_000, 1_600_000, 8_300_000, 800_000, 1800, false, theme.TextColor));
+            return xml.ToString();
+        }
+
+        const long tableX = 685_800;
+        const long tableY = 1_460_000;
+        const long tableWidth = 8_686_800;
+        var totalWeight = Math.Max(1, table.ColumnWeights.Sum());
+        var gridCols = string.Concat(table.ColumnWeights
+            .Select(weight => $"<a:gridCol w=\"{tableWidth * weight / totalWeight}\"/>"));
+
+        const long headerHeight = 480_000;
+        const long rowHeight = 415_000;
+
+        var rowsXml = new StringBuilder();
+        rowsXml.Append(BuildTableRow(table.Headers, headerHeight, theme.TitleColor, "FFFFFF", bold: true, fontSize: 1150, align: "ctr"));
+        for (var r = 0; r < table.Rows.Count; r++)
+        {
+            var isTotal = table.HasTotalRow && r == table.Rows.Count - 1;
+            var fill = isTotal
+                ? theme.CardColor
+                : (r % 2 == 0 ? theme.PanelColor : theme.BackgroundColor);
+            var textColor = isTotal ? "FFFFFF" : theme.TextColor;
+            rowsXml.Append(BuildTableRow(table.Rows[r], rowHeight, fill, textColor, bold: isTotal, fontSize: 1100, align: "ctr", firstColAlign: "l"));
+        }
+
+        var tableHeight = headerHeight + rowHeight * table.Rows.Count;
+        xml.Append($"""
+            <p:graphicFrame>
+              <p:nvGraphicFramePr><p:cNvPr id="20" name="Team table"/><p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr>
+              <p:xfrm><a:off x="{tableX}" y="{tableY}"/><a:ext cx="{tableWidth}" cy="{tableHeight}"/></p:xfrm>
+              <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table">
+                <a:tbl><a:tblPr firstRow="1" bandRow="0"/><a:tblGrid>{gridCols}</a:tblGrid>{rowsXml}</a:tbl>
+              </a:graphicData></a:graphic>
+            </p:graphicFrame>
+            """);
+
+        if (!string.IsNullOrWhiteSpace(content.Explanation))
+        {
+            var noteY = tableY + tableHeight + 200_000;
+            var noteHeight = Math.Max(400_000, SlideHeight - noteY - 250_000);
+            xml.Append(BuildTextShape(60, "Table note", content.Explanation, 685_800, noteY, 8_686_800, noteHeight, 1150, false, theme.TextColor));
+        }
+
+        return xml.ToString();
+    }
+
+    private static string BuildTableRow(
+        IReadOnlyList<string> cells,
+        long height,
+        string fillColor,
+        string fontColor,
+        bool bold,
+        int fontSize,
+        string align,
+        string? firstColAlign = null)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"<a:tr h=\"{height}\">");
+        for (var c = 0; c < cells.Count; c++)
+        {
+            var cellAlign = c == 0 && firstColAlign is not null ? firstColAlign : align;
+            sb.Append(BuildTableCell(cells[c], fillColor, fontColor, bold, fontSize, cellAlign));
+        }
+
+        sb.Append("</a:tr>");
+        return sb.ToString();
+    }
+
+    private static string BuildTableCell(string text, string fillColor, string fontColor, bool bold, int fontSize, string align)
+    {
+        return $"<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn=\"{align}\"/><a:r><a:rPr lang=\"en-US\" sz=\"{fontSize}\" b=\"{(bold ? 1 : 0)}\"><a:solidFill><a:srgbClr val=\"{fontColor}\"/></a:solidFill></a:rPr><a:t>{EscapeXml(text)}</a:t></a:r></a:p></a:txBody>"
+            + $"<a:tcPr marL=\"109728\" marR=\"91440\" marT=\"27432\" marB=\"27432\" anchor=\"ctr\"><a:solidFill><a:srgbClr val=\"{fillColor}\"/></a:solidFill></a:tcPr></a:tc>";
+    }
+
     private static string BuildFilledShape(
         uint id,
         string name,
@@ -518,18 +677,40 @@ public class PowerPointPresentationService
         long width,
         long height,
         string fillColor,
-        string geometry = "rect")
+        string geometry = "rect",
+        bool shadow = false)
     {
+        var effects = shadow ? SoftShadow : string.Empty;
         return $"""
             <p:sp>
               <p:nvSpPr><p:cNvPr id="{id}" name="{EscapeXml(name)}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
-              <p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{width}" cy="{height}"/></a:xfrm><a:prstGeom prst="{geometry}"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="{fillColor}"/></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr>
+              <p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{width}" cy="{height}"/></a:xfrm><a:prstGeom prst="{geometry}"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="{fillColor}"/></a:solidFill><a:ln><a:noFill/></a:ln>{effects}</p:spPr>
             </p:sp>
             """;
     }
 
-    private static string BuildRoundedRect(uint id, string name, long x, long y, long width, long height, string fillColor) =>
-        BuildFilledShape(id, name, x, y, width, height, fillColor, "roundRect");
+    private static string BuildGradientShape(
+        uint id,
+        string name,
+        long x,
+        long y,
+        long width,
+        long height,
+        string startColor,
+        string endColor,
+        int angleDegrees = 45)
+    {
+        var angle = angleDegrees * 60_000;
+        return $"""
+            <p:sp>
+              <p:nvSpPr><p:cNvPr id="{id}" name="{EscapeXml(name)}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
+              <p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{width}" cy="{height}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:gradFill><a:gsLst><a:gs pos="0"><a:srgbClr val="{startColor}"/></a:gs><a:gs pos="100000"><a:srgbClr val="{endColor}"/></a:gs></a:gsLst><a:lin ang="{angle}" scaled="1"/></a:gradFill><a:ln><a:noFill/></a:ln></p:spPr>
+            </p:sp>
+            """;
+    }
+
+    private static string BuildRoundedRect(uint id, string name, long x, long y, long width, long height, string fillColor, bool shadow = false) =>
+        BuildFilledShape(id, name, x, y, width, height, fillColor, "roundRect", shadow);
 
     private static string BuildLineShape(
         uint id,
@@ -627,7 +808,8 @@ public class PowerPointPresentationService
         Cover,
         Dashboard,
         BarChart,
-        LineChart
+        LineChart,
+        Table
     }
 
     private sealed record SlideContent(
@@ -636,7 +818,14 @@ public class PowerPointPresentationService
         SlideKind Kind = SlideKind.Text,
         ChartContent? Chart = null,
         string Explanation = "",
-        List<MetricCard>? Cards = null);
+        List<MetricCard>? Cards = null,
+        TableContent? Table = null);
+
+    private sealed record TableContent(
+        IReadOnlyList<string> Headers,
+        IReadOnlyList<IReadOnlyList<string>> Rows,
+        IReadOnlyList<int> ColumnWeights,
+        bool HasTotalRow = false);
 
     private sealed record ChartContent(
         IReadOnlyList<MetricPoint> Points,
@@ -685,6 +874,9 @@ public class PowerPointPresentationService
           <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/>
         </Relationships>
         """;
+
+    private const string SoftShadow =
+        "<a:effectLst><a:outerShdw blurRad=\"90000\" dist=\"38100\" dir=\"5400000\" rotWithShape=\"0\"><a:srgbClr val=\"1B2733\"><a:alpha val=\"26000\"/></a:srgbClr></a:outerShdw></a:effectLst>";
 
     private const string GroupShapeProperties = """
         <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>

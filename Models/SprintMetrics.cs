@@ -78,8 +78,12 @@ public class AssigneeLoad
     public string Assignee { get; set; } = string.Empty;
     public int TotalTasks { get; set; }
     public int CompletedTasks { get; set; }
+    public int InProgressTasks { get; set; }
     public double StoryPoints { get; set; }
+    public double CompletedStoryPoints { get; set; }
     public double CompletionRatePercent => TotalTasks == 0 ? 0 : CompletedTasks * 100.0 / TotalTasks;
+    public double PointsCompletionRatePercent => StoryPoints <= 0 ? 0 : CompletedStoryPoints * 100.0 / StoryPoints;
+    public int RemainingTasks => Math.Max(0, TotalTasks - CompletedTasks);
 }
 
 public class MetricPoint
