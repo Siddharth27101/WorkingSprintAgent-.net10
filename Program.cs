@@ -23,7 +23,14 @@ builder.Services.AddOptions<SemanticKernelOptions>()
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // Serialize enums (e.g. PresentationStyle) as their string names instead of
+        // integers so the Swagger "Template" dropdown shows Professional/Modern/etc.
+        options.JsonSerializerOptions.Converters.Add(
+            new System.Text.Json.Serialization.JsonStringEnumConverter());
+    });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {

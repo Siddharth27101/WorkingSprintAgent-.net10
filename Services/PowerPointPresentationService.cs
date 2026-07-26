@@ -47,11 +47,18 @@ public class PowerPointPresentationService
             WriteEntry(archive, "ppt/slideLayouts/_rels/slideLayout1.xml.rels", SlideLayoutRelationships);
             WriteEntry(archive, "ppt/theme/theme1.xml", Theme);
 
+            var footerLabel = string.IsNullOrWhiteSpace(options.CompanyName)
+                ? $"{metrics.SprintName} \u00b7 Sprint Report"
+                : $"{options.CompanyName.Trim()} \u00b7 {metrics.SprintName}";
+
             for (var index = 0; index < slides.Count; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var slideNumber = index + 1;
-                WriteEntry(archive, $"ppt/slides/slide{slideNumber}.xml", BuildSlide(slides[index], theme));
+                WriteEntry(
+                    archive,
+                    $"ppt/slides/slide{slideNumber}.xml",
+                    BuildSlide(slides[index], theme, slideNumber, slides.Count, footerLabel));
                 WriteEntry(archive, $"ppt/slides/_rels/slide{slideNumber}.xml.rels", SlideRelationships);
             }
         }
@@ -380,7 +387,12 @@ public class PowerPointPresentationService
             """;
     }
 
-    private static string BuildSlide(SlideContent content, PresentationTheme theme)
+    private static string BuildSlide(
+        SlideContent content,
+        PresentationTheme theme,
+        int slideNumber,
+        int slideCount,
+        string footerLabel)
     {
         var body = content.Kind switch
         {
@@ -391,6 +403,12 @@ public class PowerPointPresentationService
             SlideKind.Table => BuildTable(content, theme),
             _ => BuildTextBody(content, theme)
         };
+
+        // The cover is a full-bleed design; every other slide gets a subtle branded footer.
+        if (content.Kind != SlideKind.Cover)
+        {
+            body += BuildFooter(theme, footerLabel, slideNumber, slideCount);
+        }
 
         return $"""
             <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -411,18 +429,43 @@ public class PowerPointPresentationService
     {
         var lines = content.Body.Replace("\r", string.Empty, StringComparison.Ordinal).Split('\n');
         var heading = lines.ElementAtOrDefault(0) ?? "Sprint Report";
-        var subtitle = string.Join('\n', lines.Skip(1));
-        return BuildGradientShape(2, "Cover panel", 0, 0, SlideWidth, SlideHeight, theme.TitleColor, theme.CardColor, 60)
-            + BuildFilledShape(6, "Cover accent", 3_579_200, 2_050_000, 2_900_000, 60_000, theme.AccentColor, "roundRect")
-            + BuildTextShape(4, "Cover heading", heading, 850_000, 2_300_000, 8_350_000, 1_700_000, 3400, true, "FFFFFF", "ctr")
-            + BuildTextShape(5, "Cover subtitle", subtitle, 1_300_000, 4_150_000, 7_450_000, 1_400_000, 1700, false, "FFFFFF", "ctr");
+        var subtitle = string.Join('\n', lines
+            .Skip(1)
+            .Where(line => !string.IsNullOrWhiteSpace(line)));
+
+        var xml = new StringBuilder();
+        // Diagonal gradient backdrop from the deep title colour into the card colour.
+        xml.Append(BuildGradientShape(2, "Cover backdrop", 0, 0, SlideWidth, SlideHeight, theme.TitleColor, theme.CardColor, 60));
+        // Decorative left ribbon and bottom band give the cover a designed, branded feel.
+        xml.Append(BuildFilledShape(3, "Cover ribbon", 0, 0, 150_000, SlideHeight, theme.AccentColor));
+        xml.Append(BuildFilledShape(4, "Cover base band", 0, SlideHeight - 470_000, SlideWidth, 470_000, theme.AccentColor));
+        // Kicker label above the title.
+        xml.Append(BuildTextShape(5, "Cover eyebrow", "SPRINT INTELLIGENCE BRIEFING", 850_000, 2_020_000, 8_350_000, 480_000, 1300, true, "FFFFFF", "ctr"));
+        // Main heading.
+        xml.Append(BuildTextShape(6, "Cover heading", heading, 850_000, 2_620_000, 8_350_000, 1_650_000, 3600, true, "FFFFFF", "ctr"));
+        // Accent divider under the heading.
+        xml.Append(BuildFilledShape(7, "Cover accent", 3_929_200, 4_320_000, 2_200_000, 55_000, theme.AccentColor, "roundRect"));
+        // Subtitle block (date, company, briefing note).
+        xml.Append(BuildTextShape(8, "Cover subtitle", subtitle, 1_300_000, 4_600_000, 7_450_000, 1_500_000, 1600, false, "FFFFFF", "ctr"));
+        return xml.ToString();
+    }
+
+    private static string BuildFooter(PresentationTheme theme, string label, int slideNumber, int slideCount)
+    {
+        // High shape ids (900+) are used to avoid colliding with any content shapes on the slide.
+        var trimmed = label.Length > 70 ? label[..67] + "..." : label;
+        return BuildFilledShape(900, "Footer rule", 685_800, 7_070_000, 8_686_800, 12_000, theme.AccentColor)
+            + BuildTextShape(901, "Footer label", trimmed, 685_800, 7_130_000, 6_200_000, 320_000, 900, false, theme.TextColor, "l")
+            + BuildTextShape(902, "Footer page", $"{slideNumber} / {slideCount}", 6_685_800, 7_130_000, 2_686_800, 320_000, 900, true, theme.TitleColor, "r");
     }
 
     private static string BuildTextBody(SlideContent content, PresentationTheme theme)
     {
         return BuildTextShape(2, "Title", content.Title, 685_800, 350_000, 8_686_800, 900_000, 3000, true, theme.TitleColor)
             + BuildFilledShape(3, "Title accent", 685_800, 1_270_000, 1_600_000, 55_000, theme.AccentColor)
-            + BuildTextShape(4, "Content", content.Body, 850_000, 1_600_000, 8_300_000, 5_200_000, 1750, false, theme.TextColor);
+            // Seat the body copy inside a soft rounded panel so text slides read as designed cards.
+            + BuildRoundedRect(5, "Content panel", 685_800, 1_480_000, 8_686_800, 5_050_000, theme.PanelColor, shadow: true)
+            + BuildTextShape(4, "Content", content.Body, 985_800, 1_700_000, 8_086_800, 4_650_000, 1750, false, theme.TextColor);
     }
 
     private static string BuildDashboard(SlideContent content, PresentationTheme theme)
@@ -444,8 +487,9 @@ public class PowerPointPresentationService
                 _ => theme.AccentColor
             };
             xml.Append(BuildRoundedRect(10u + (uint)index, $"Metric {index + 1}", x, y, 1_980_000, 1_380_000, fill, shadow: true));
-            xml.Append(BuildTextShape(30u + (uint)index, $"Metric value {index + 1}", cards[index].Value, x + 90_000, y + 210_000, 1_800_000, 520_000, 2350, true, "FFFFFF", "ctr"));
-            xml.Append(BuildTextShape(50u + (uint)index, $"Metric label {index + 1}", cards[index].Label, x + 90_000, y + 800_000, 1_800_000, 350_000, 1150, false, "FFFFFF", "ctr"));
+            xml.Append(BuildTextShape(30u + (uint)index, $"Metric value {index + 1}", cards[index].Value, x + 90_000, y + 200_000, 1_800_000, 520_000, 2350, true, "FFFFFF", "ctr"));
+            xml.Append(BuildFilledShape(70u + (uint)index, $"Metric divider {index + 1}", x + 690_000, y + 770_000, 600_000, 11_000, "FFFFFF", "roundRect"));
+            xml.Append(BuildTextShape(50u + (uint)index, $"Metric label {index + 1}", cards[index].Label, x + 90_000, y + 830_000, 1_800_000, 350_000, 1150, false, "FFFFFF", "ctr"));
         }
 
         var footer = string.IsNullOrWhiteSpace(content.Explanation)
@@ -614,7 +658,7 @@ public class PowerPointPresentationService
         if (!string.IsNullOrWhiteSpace(content.Explanation))
         {
             var noteY = tableY + tableHeight + 200_000;
-            var noteHeight = Math.Max(400_000, SlideHeight - noteY - 250_000);
+            var noteHeight = Math.Max(400_000, SlideHeight - noteY - 700_000);
             xml.Append(BuildTextShape(60, "Table note", content.Explanation, 685_800, noteY, 8_686_800, noteHeight, 1150, false, theme.TextColor));
         }
 
@@ -749,12 +793,47 @@ public class PowerPointPresentationService
 
     private static PresentationTheme GetTheme(string template)
     {
+        // Palettes are tuned for stakeholder-facing decks: soft light canvases,
+        // strong high-contrast headings, and saturated card colours that keep the
+        // white metric text readable.
         return template.ToLowerInvariant() switch
         {
-            "modern" => new PresentationTheme("F7F3FF", "603C8F", "302842", "603C8F", "27864B", "D49B00", "F0E9F7", "EEE7F5"),
-            "corporate" => new PresentationTheme("F4F7FA", "17365D", "243447", "3279B7", "27864B", "D49B00", "E8EEF5", "E5EDF6"),
-            "minimal" => new PresentationTheme("FFFFFF", "111111", "333333", "444444", "6B7280", "8A6500", "F3F4F6", "F5F5F5"),
-            _ => new PresentationTheme("FFFFFF", "243447", "243447", "3279B7", "27864B", "D49B00", "EEF3F7", "E8F0F7")
+            "modern" => new PresentationTheme(
+                BackgroundColor: "F7F5FF",
+                TitleColor: "3A2A6E",
+                TextColor: "3A3550",
+                CardColor: "6D28D9",
+                SecondaryCardColor: "0D9488",
+                AccentColor: "DB7B0B",
+                PanelColor: "F0EBFB",
+                ExplanationColor: "ECE7F8"),
+            "corporate" => new PresentationTheme(
+                BackgroundColor: "F4F6FA",
+                TitleColor: "0B1E3B",
+                TextColor: "29354A",
+                CardColor: "143A63",
+                SecondaryCardColor: "2E6CA4",
+                AccentColor: "B8901F",
+                PanelColor: "E9EFF6",
+                ExplanationColor: "E5EDF5"),
+            "minimal" => new PresentationTheme(
+                BackgroundColor: "FFFFFF",
+                TitleColor: "111827",
+                TextColor: "374151",
+                CardColor: "1F2937",
+                SecondaryCardColor: "4B5563",
+                AccentColor: "111827",
+                PanelColor: "F3F4F6",
+                ExplanationColor: "F5F5F5"),
+            _ => new PresentationTheme(
+                BackgroundColor: "F5F8FC",
+                TitleColor: "0F2C4C",
+                TextColor: "33475B",
+                CardColor: "1F5AA6",
+                SecondaryCardColor: "2E86C1",
+                AccentColor: "E08A00",
+                PanelColor: "EAF1FA",
+                ExplanationColor: "E5EDF8")
         };
     }
 
