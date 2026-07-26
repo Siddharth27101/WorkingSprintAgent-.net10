@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace WorkingSprintAgent.Models;
 
@@ -33,7 +34,10 @@ public sealed class GenerateSprintReportRequest
 
 /// <summary>
 /// Available presentation styles for the generated PowerPoint deck.
+/// Serialized as string names (Professional, Modern, Corporate, Minimal) so the
+/// Swagger dropdown shows readable labels instead of numeric indexes.
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum PresentationStyle
 {
     Professional,
